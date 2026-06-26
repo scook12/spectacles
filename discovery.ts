@@ -1,1 +1,1 @@
-export * from './src/discovery.ts'
+export * from './src/discovery.js'

@@ -94,28 +94,51 @@ function getNamespaceImportNames(sourceFile: SourceFile): Set<string> {
   return names
 }
 
+function getFactoryRootCall(
+  callExpression: CallExpression,
+  directNames: Set<string>,
+  namespaceImportNames: Set<string>,
+  expectedPropertyName: string,
+): CallExpression | null {
+  let current: CallExpression | null = callExpression
+
+  while (current) {
+    const expression = current.getExpression()
+
+    if (Node.isIdentifier(expression)) {
+      return directNames.has(expression.getText()) ? current : null
+    }
+
+    if (!Node.isPropertyAccessExpression(expression)) {
+      return null
+    }
+
+    const left = expression.getExpression()
+    if (
+      Node.isIdentifier(left)
+      && namespaceImportNames.has(left.getText())
+      && expression.getName() === expectedPropertyName
+    ) {
+      return current
+    }
+
+    if (!Node.isCallExpression(left)) {
+      return null
+    }
+
+    current = left
+  }
+
+  return null
+}
+
 function isMatchingFactoryCall(
   callExpression: CallExpression,
   directNames: Set<string>,
   namespaceImportNames: Set<string>,
   expectedPropertyName: string,
 ): boolean {
-  const expression = callExpression.getExpression()
-
-  if (Node.isIdentifier(expression)) {
-    return directNames.has(expression.getText())
-  }
-
-  if (Node.isPropertyAccessExpression(expression)) {
-    const left = expression.getExpression()
-    return (
-      Node.isIdentifier(left)
-      && namespaceImportNames.has(left.getText())
-      && expression.getName() === expectedPropertyName
-    )
-  }
-
-  return false
+  return getFactoryRootCall(callExpression, directNames, namespaceImportNames, expectedPropertyName) !== null
 }
 
 function getRuntimeName(callExpression: CallExpression): string | undefined {
@@ -405,7 +428,7 @@ export function discoverContracts(project: Project): DiscoveredContract[] {
         localName: exportedVariable.localName,
         exportNames: exportedVariable.exportNames,
         isDefaultExport: exportedVariable.isDefaultExport,
-        runtimeName: getRuntimeName(initializer),
+        runtimeName: getRuntimeName(getFactoryRootCall(initializer, directNames, namespaceImportNames, 'contract') ?? initializer),
       }))
     }
 
@@ -419,7 +442,14 @@ export function discoverContracts(project: Project): DiscoveredContract[] {
         filePath: exportedDefaultCall.filePath,
         exportNames: exportedDefaultCall.exportNames,
         isDefaultExport: exportedDefaultCall.isDefaultExport,
-        runtimeName: getRuntimeName(getCallExpressionFromExportAssignment(exportedDefaultCall.exportAssignment)),
+        runtimeName: getRuntimeName(
+          getFactoryRootCall(
+            getCallExpressionFromExportAssignment(exportedDefaultCall.exportAssignment),
+            directNames,
+            namespaceImportNames,
+            'contract',
+          ) ?? getCallExpressionFromExportAssignment(exportedDefaultCall.exportAssignment),
+        ),
       }))
     }
   }
