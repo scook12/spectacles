@@ -27,6 +27,10 @@
     "./discovery": {
       "types": "./dist/discovery.d.ts",
       "import": "./dist/discovery.js"
+    },
+    "./planning": {
+      "types": "./dist/planning.d.ts",
+      "import": "./dist/planning.js"
     }
   },
   "files": [

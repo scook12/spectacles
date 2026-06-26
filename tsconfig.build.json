@@ -12,7 +12,8 @@
   "include": [
     "index.ts",
     "vitest.ts",
-    "discovery.ts"
+    "discovery.ts",
+    "planning.ts"
   ],
   "exclude": [
     "test",
