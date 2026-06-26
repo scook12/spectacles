@@ -35,6 +35,10 @@
     "./rendering": {
       "types": "./dist/rendering.d.ts",
       "import": "./dist/rendering.js"
+    },
+    "./generation": {
+      "types": "./dist/generation.d.ts",
+      "import": "./dist/generation.js"
     }
   },
   "files": [
