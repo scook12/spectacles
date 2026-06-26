@@ -11,7 +11,8 @@
   },
   "include": [
     "index.ts",
-    "vitest.ts"
+    "vitest.ts",
+    "discovery.ts"
   ],
   "exclude": [
     "test",
