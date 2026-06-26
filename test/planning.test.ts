@@ -86,17 +86,17 @@ describe('generateContractTestPlan()', () => {
       },
       generation: [
         {
-          kind: 'input-schema',
+          kind: 'args-schema',
           source: 'engine',
           confidence: 'sound',
-          description: 'Generate valid inputs from the contract input schema',
+          description: 'Generate valid argument lists from the contract args schema',
         },
         {
           kind: 'where-clauses',
           source: 'contract',
           confidence: 'sound',
           count: 1,
-          description: 'Constrain generated inputs using 1 structured where-clause',
+          description: 'Constrain generated argument lists using 1 structured where-clause',
         },
         {
           kind: 'preconditions',
@@ -109,18 +109,18 @@ describe('generateContractTestPlan()', () => {
       ],
       checks: [
         {
-          kind: 'valid-input-fuzz',
+          kind: 'valid-args-fuzz',
           phase: 'property',
           source: 'engine',
           confidence: 'derived',
-          description: 'Exercise implementations across many generated valid inputs',
+          description: 'Exercise implementations across many generated valid argument lists',
         },
         {
-          kind: 'output-schema',
+          kind: 'return-schema',
           phase: 'property',
           source: 'engine',
           confidence: 'sound',
-          description: 'Assert that outputs conform to the contract output schema',
+          description: 'Assert that returned values conform to the contract return schema',
         },
         {
           kind: 'examples',
@@ -138,7 +138,7 @@ describe('generateContractTestPlan()', () => {
           confidence: 'sound',
           count: 1,
           names: ['difference'],
-          description: 'Check 1 postcondition over generated valid inputs',
+          description: 'Check 1 postcondition over generated valid argument lists',
         },
         {
           kind: 'laws',
@@ -161,26 +161,26 @@ describe('generateContractTestPlan()', () => {
     expect(plan.suites).toHaveLength(1)
     expect(plan.suites[0]?.generation).toEqual([
       {
-        kind: 'input-schema',
+        kind: 'args-schema',
         source: 'engine',
         confidence: 'sound',
-        description: 'Generate valid inputs from the contract input schema',
+        description: 'Generate valid argument lists from the contract args schema',
       },
     ])
     expect(plan.suites[0]?.checks).toEqual([
       {
-        kind: 'valid-input-fuzz',
+        kind: 'valid-args-fuzz',
         phase: 'property',
         source: 'engine',
         confidence: 'derived',
-        description: 'Exercise implementations across many generated valid inputs',
+        description: 'Exercise implementations across many generated valid argument lists',
       },
       {
-        kind: 'output-schema',
+        kind: 'return-schema',
         phase: 'property',
         source: 'engine',
         confidence: 'sound',
-        description: 'Assert that outputs conform to the contract output schema',
+        description: 'Assert that returned values conform to the contract return schema',
       },
     ])
   })

@@ -161,9 +161,10 @@ describe('contract()', () => {
   it('supports variadic contracts with args/returns and arg helpers', () => {
     const addOrdered = contract('AddOrdered', {
       args: z.tuple([z.number().int(), z.number().int()]),
+      argNames: ['left', 'right'],
       returns: z.number().int(),
     })
-      .where(arg(0).lte(arg(1)))
+      .where(arg('left').lte(arg('right')))
       .pre('ordered', ({ args }) => args[0] <= args[1])
       .post('adds both args', ({ args, result, output }) => result === args[0] + args[1] && output === result)
       .example('small numbers', {
@@ -179,9 +180,10 @@ describe('contract()', () => {
     expect(addOrdered.output).toBe(addOrdered.returns)
     expect(addOrdered.wheres[0]?.kind).toBe('comparison')
     if (addOrdered.wheres[0]?.kind === 'comparison') {
-      expect(addOrdered.wheres[0].left.path).toBe('args.0')
+      expect(addOrdered.wheres[0].left.path).toBe('args.left')
       expect(addOrdered.wheres[0].operator).toBe('lte')
-      expect('path' in addOrdered.wheres[0].right && addOrdered.wheres[0].right.path).toBe('args.1')
+      const right = addOrdered.wheres[0].right as { path?: string }
+      expect(right.path).toBe('args.right')
     }
     expect(implementation(3, 4)).toBe(7)
   })

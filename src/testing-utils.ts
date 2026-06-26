@@ -92,13 +92,29 @@ function compareValues(left: unknown, operator: 'eq' | 'ne' | 'lt' | 'lte' | 'gt
   }
 }
 
-export function buildArgsRoot(args: readonly unknown[]): { args: readonly unknown[]; input?: unknown } {
-  return args.length === 1 ? { args, input: args[0] } : { args }
+function withArgNames(args: readonly unknown[], argNames?: readonly string[]): readonly unknown[] {
+  if (!argNames || argNames.length === 0) {
+    return args
+  }
+
+  const namedArgs = [...args] as unknown[] & Record<string, unknown>
+  argNames.forEach((name, index) => {
+    namedArgs[name] = args[index]
+  })
+  return namedArgs
+}
+
+export function buildArgsRoot(
+  args: readonly unknown[],
+  argNames?: readonly string[],
+): { args: readonly unknown[]; input?: unknown } {
+  const namedArgs = withArgNames(args, argNames)
+  return args.length === 1 ? { args: namedArgs, input: args[0] } : { args: namedArgs }
 }
 
 export function createPreContext<C extends ContractLike>(contract: C, args: ContractArgs<C>): PreContext<C> {
   return {
-    ...buildArgsRoot(args),
+    ...buildArgsRoot(args, contract.argNames),
     contract,
     args,
   } as PreContext<C>
@@ -110,7 +126,7 @@ export function createPostContext<C extends ContractLike>(
   result: ContractReturn<C>,
 ): PostContext<C> {
   return {
-    ...buildArgsRoot(args),
+    ...buildArgsRoot(args, contract.argNames),
     contract,
     args,
     result,
@@ -125,7 +141,7 @@ export function createLawContext<C extends ContractLike, V extends LawVarSchemas
   vars: InferLawVars<V>,
 ): LawContext<C, V> {
   return {
-    ...buildArgsRoot(args),
+    ...buildArgsRoot(args, contract.argNames),
     contract,
     args,
     impl,
@@ -467,7 +483,7 @@ export function validArgsArbitrary<C extends ContractLike>(
       return false
     }
 
-    const root = buildArgsRoot(args)
+    const root = buildArgsRoot(args, contract.argNames)
     return wheres.every((clause) => evaluateWhereClause(root, clause))
   }) as fc.Arbitrary<ContractArgs<C>>
 }
@@ -514,7 +530,7 @@ export async function validateExampleArgs<C extends ContractLike>(
 ): Promise<void> {
   await assertSchema(contract.args, args, 'example args')
 
-  const root = buildArgsRoot(args)
+  const root = buildArgsRoot(args, contract.argNames)
   for (const clause of wheres) {
     if (!evaluateWhereClause(root, clause)) {
       throw new Error(`example args violated where-clause: ${clause.kind}`)

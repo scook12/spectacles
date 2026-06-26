@@ -20,7 +20,7 @@ export interface PlannedReference {
 }
 
 export interface PlannedGenerationStep {
-  readonly kind: 'input-schema' | 'where-clauses' | 'preconditions'
+  readonly kind: 'args-schema' | 'where-clauses' | 'preconditions'
   readonly source: PlanSource
   readonly confidence: PlanConfidence
   readonly description: string
@@ -29,7 +29,7 @@ export interface PlannedGenerationStep {
 }
 
 export interface PlannedCheck {
-  readonly kind: 'valid-input-fuzz' | 'output-schema' | 'examples' | 'postconditions' | 'laws'
+  readonly kind: 'valid-args-fuzz' | 'return-schema' | 'examples' | 'postconditions' | 'laws'
   readonly phase: Exclude<PlanPhase, 'setup'>
   readonly source: PlanSource
   readonly confidence: PlanConfidence
@@ -257,10 +257,10 @@ function describeCount(label: string, count: number): string {
 function createGenerationSteps(summary: ContractClauseSummary): PlannedGenerationStep[] {
   const steps: PlannedGenerationStep[] = [
     {
-      kind: 'input-schema',
+      kind: 'args-schema',
       source: 'engine',
       confidence: 'sound',
-      description: 'Generate valid inputs from the contract input schema',
+      description: 'Generate valid argument lists from the contract args schema',
     },
   ]
 
@@ -270,7 +270,7 @@ function createGenerationSteps(summary: ContractClauseSummary): PlannedGeneratio
       source: 'contract',
       confidence: 'sound',
       count: summary.whereCount,
-      description: `Constrain generated inputs using ${describeCount('structured where-clause', summary.whereCount)}`,
+      description: `Constrain generated argument lists using ${describeCount('structured where-clause', summary.whereCount)}`,
     })
   }
 
@@ -291,18 +291,18 @@ function createGenerationSteps(summary: ContractClauseSummary): PlannedGeneratio
 function createChecks(summary: ContractClauseSummary): PlannedCheck[] {
   const checks: PlannedCheck[] = [
     {
-      kind: 'valid-input-fuzz',
+      kind: 'valid-args-fuzz',
       phase: 'property',
       source: 'engine',
       confidence: 'derived',
-      description: 'Exercise implementations across many generated valid inputs',
+      description: 'Exercise implementations across many generated valid argument lists',
     },
     {
-      kind: 'output-schema',
+      kind: 'return-schema',
       phase: 'property',
       source: 'engine',
       confidence: 'sound',
-      description: 'Assert that outputs conform to the contract output schema',
+      description: 'Assert that returned values conform to the contract return schema',
     },
   ]
 
@@ -326,7 +326,7 @@ function createChecks(summary: ContractClauseSummary): PlannedCheck[] {
       confidence: 'sound',
       count: summary.postNames.length,
       names: summary.postNames,
-      description: `Check ${describeCount('postcondition', summary.postNames.length)} over generated valid inputs`,
+      description: `Check ${describeCount('postcondition', summary.postNames.length)} over generated valid argument lists`,
     })
   }
 

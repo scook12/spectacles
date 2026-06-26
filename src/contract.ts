@@ -419,6 +419,13 @@ function normalizeContractSpec<
     }
   }
 
+  if (spec.argNames !== undefined) {
+    const items = (((spec.args as any)?._zod?.def?.items ?? (spec.args as any)?.def?.items) ?? []) as readonly unknown[]
+    if (items.length > 0 && spec.argNames.length !== items.length) {
+      throw new TypeError('contract(name, spec): argNames length must match the args tuple length')
+    }
+  }
+
   return {
     args: spec.args,
     returns: spec.returns,

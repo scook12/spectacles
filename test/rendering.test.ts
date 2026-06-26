@@ -21,19 +21,19 @@ describe('renderVitestContractSuite()', () => {
       },
       generation: [
         {
-          kind: 'input-schema',
+          kind: 'args-schema',
           source: 'engine',
           confidence: 'sound',
-          description: 'Generate valid inputs from the contract input schema',
+          description: 'Generate valid argument lists from the contract args schema',
         },
       ],
       checks: [
         {
-          kind: 'output-schema',
+          kind: 'return-schema',
           phase: 'property',
           source: 'engine',
           confidence: 'sound',
-          description: 'Assert that outputs conform to the contract output schema',
+          description: 'Assert that returned values conform to the contract return schema',
         },
       ],
     }
