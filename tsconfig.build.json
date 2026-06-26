@@ -13,7 +13,8 @@
     "index.ts",
     "vitest.ts",
     "discovery.ts",
-    "planning.ts"
+    "planning.ts",
+    "rendering.ts"
   ],
   "exclude": [
     "test",

@@ -31,6 +31,10 @@
     "./planning": {
       "types": "./dist/planning.d.ts",
       "import": "./dist/planning.js"
+    },
+    "./rendering": {
+      "types": "./dist/rendering.d.ts",
+      "import": "./dist/rendering.js"
     }
   },
   "files": [
