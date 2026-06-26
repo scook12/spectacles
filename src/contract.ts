@@ -70,75 +70,89 @@ export type WhereClause =
   | NonEmptyWhereClause
 
 export interface ContractLike {
-  readonly input: AnySchema
+  readonly args: AnySchema
+  readonly returns: AnySchema
+  readonly input?: AnySchema | undefined
   readonly output: AnySchema
+  readonly argNames?: readonly string[] | undefined
 }
+
+export type ContractArgs<C extends ContractLike> = Infer<C['args']> extends readonly unknown[] ? Infer<C['args']> : never
+export type ContractReturn<C extends ContractLike> = Infer<C['returns']>
+export type ContractInput<C extends ContractLike> = ContractArgs<C> extends readonly [infer Only] ? Only : never
+export type ContractOutput<C extends ContractLike> = ContractReturn<C>
+
+export type UnaryInputAlias<C extends ContractLike> = ContractArgs<C> extends readonly [infer Only]
+  ? { readonly input: Only }
+  : {}
 
 export interface Contract<
   Name extends string = string,
-  InSchema extends AnySchema = AnySchema,
-  OutSchema extends AnySchema = AnySchema,
+  ArgsSchema extends AnySchema = AnySchema,
+  ReturnSchema extends AnySchema = AnySchema,
+  InputSchema extends AnySchema | undefined = AnySchema | undefined,
 > {
   readonly kind: 'contract'
   readonly name: Name
-  readonly input: InSchema
-  readonly output: OutSchema
+  readonly args: ArgsSchema
+  readonly returns: ReturnSchema
+  readonly input?: InputSchema
+  readonly output: ReturnSchema
+  readonly argNames?: readonly string[]
 
   readonly wheres: readonly WhereClause[]
-  readonly pres: readonly PreClause<Contract<Name, InSchema, OutSchema>>[]
-  readonly posts: readonly PostClause<Contract<Name, InSchema, OutSchema>>[]
-  readonly laws: readonly LawClause<Contract<Name, InSchema, OutSchema>, any>[]
-  readonly examples: readonly ExampleClause<Contract<Name, InSchema, OutSchema>>[]
+  readonly pres: readonly PreClause<Contract<Name, ArgsSchema, ReturnSchema, InputSchema>>[]
+  readonly posts: readonly PostClause<Contract<Name, ArgsSchema, ReturnSchema, InputSchema>>[]
+  readonly laws: readonly LawClause<Contract<Name, ArgsSchema, ReturnSchema, InputSchema>, any>[]
+  readonly examples: readonly ExampleClause<Contract<Name, ArgsSchema, ReturnSchema, InputSchema>>[]
 
-  where(...clauses: readonly WhereClause[]): Contract<Name, InSchema, OutSchema>
+  where(...clauses: readonly WhereClause[]): Contract<Name, ArgsSchema, ReturnSchema, InputSchema>
 
   pre(
     name: string,
-    predicate: PrePredicate<Contract<Name, InSchema, OutSchema>>,
-  ): Contract<Name, InSchema, OutSchema>
+    predicate: PrePredicate<Contract<Name, ArgsSchema, ReturnSchema, InputSchema>>,
+  ): Contract<Name, ArgsSchema, ReturnSchema, InputSchema>
 
   post(
     name: string,
-    predicate: PostPredicate<Contract<Name, InSchema, OutSchema>>,
-  ): Contract<Name, InSchema, OutSchema>
+    predicate: PostPredicate<Contract<Name, ArgsSchema, ReturnSchema, InputSchema>>,
+  ): Contract<Name, ArgsSchema, ReturnSchema, InputSchema>
 
   law<V extends LawVarSchemas>(
     name: string,
     vars: V,
-    predicate: LawPredicate<Contract<Name, InSchema, OutSchema>, V>,
-  ): Contract<Name, InSchema, OutSchema>
+    predicate: LawPredicate<Contract<Name, ArgsSchema, ReturnSchema, InputSchema>, V>,
+  ): Contract<Name, ArgsSchema, ReturnSchema, InputSchema>
 
   example(
     name: string,
-    example: ExampleCase<Contract<Name, InSchema, OutSchema>>,
-  ): Contract<Name, InSchema, OutSchema>
+    example: ExampleCase<Contract<Name, ArgsSchema, ReturnSchema, InputSchema>>,
+  ): Contract<Name, ArgsSchema, ReturnSchema, InputSchema>
 }
 
-export type AnyContract = Contract<any, AnySchema, AnySchema>
-
-export type ContractInput<C extends ContractLike> = Infer<C['input']>
-export type ContractOutput<C extends ContractLike> = Infer<C['output']>
+export type AnyContract = Contract<any, AnySchema, AnySchema, AnySchema | undefined>
 
 export type ImplementationFn<C extends ContractLike> = (
-  input: ContractInput<C>,
-) => MaybePromise<ContractOutput<C>>
+  ...args: ContractArgs<C>
+) => MaybePromise<ContractReturn<C>>
 
-export interface PreContext<C extends ContractLike> {
+export type PreContext<C extends ContractLike> = {
   readonly contract: C
-  readonly input: ContractInput<C>
-}
+  readonly args: ContractArgs<C>
+} & UnaryInputAlias<C>
 
-export interface PostContext<C extends ContractLike> {
+export type PostContext<C extends ContractLike> = {
   readonly contract: C
-  readonly input: ContractInput<C>
-  readonly output: ContractOutput<C>
-}
+  readonly args: ContractArgs<C>
+  readonly result: ContractReturn<C>
+  readonly output: ContractReturn<C>
+} & UnaryInputAlias<C>
 
 export type LawContext<C extends ContractLike, V extends LawVarSchemas> = {
   readonly contract: C
-  readonly input: ContractInput<C>
+  readonly args: ContractArgs<C>
   readonly impl: ImplementationFn<C>
-} & InferLawVars<V>
+} & UnaryInputAlias<C> & InferLawVars<V>
 
 export type PrePredicate<C extends ContractLike> = (
   ctx: PreContext<C>,
@@ -153,9 +167,23 @@ export type LawPredicate<
   V extends LawVarSchemas = LawVarSchemas,
 > = (ctx: LawContext<C, V>) => MaybePromise<boolean | void>
 
-export interface ExampleCase<C extends ContractLike> {
-  readonly input: ContractInput<C>
-  readonly output?: ContractOutput<C>
+export type VariadicExampleCase<C extends ContractLike> = {
+  readonly args: ContractArgs<C>
+  readonly result?: ContractReturn<C>
+}
+
+export type UnaryExampleCase<C extends ContractLike> = ContractArgs<C> extends readonly [infer Only]
+  ? {
+      readonly input: Only
+      readonly output?: ContractReturn<C>
+    }
+  : never
+
+export type ExampleCase<C extends ContractLike> = VariadicExampleCase<C> | UnaryExampleCase<C>
+
+export interface NormalizedExampleCase<C extends ContractLike> {
+  readonly args: ContractArgs<C>
+  readonly result?: ContractReturn<C>
 }
 
 export interface PreClause<C extends ContractLike> {
@@ -186,7 +214,7 @@ export interface ExampleClause<C extends ContractLike> {
   readonly example: ExampleCase<C>
 }
 
-export interface ContractSpec<
+export interface UnaryContractSpec<
   InSchema extends AnySchema,
   OutSchema extends AnySchema,
 > {
@@ -194,22 +222,60 @@ export interface ContractSpec<
   readonly output: OutSchema
 }
 
+export interface VariadicContractSpec<
+  ArgsSchema extends AnySchema,
+  ReturnSchema extends AnySchema,
+> {
+  readonly args: ArgsSchema
+  readonly returns: ReturnSchema
+  readonly argNames?: readonly string[]
+}
+
+export type ContractSpec<
+  InSchema extends AnySchema,
+  OutSchema extends AnySchema,
+  ArgsSchema extends AnySchema = z.ZodTuple<[InSchema], null>,
+  ReturnSchema extends AnySchema = OutSchema,
+> = UnaryContractSpec<InSchema, OutSchema> | VariadicContractSpec<ArgsSchema, ReturnSchema>
+
+export type AnyContractSpec = UnaryContractSpec<AnySchema, AnySchema> | VariadicContractSpec<AnySchema, AnySchema>
+
+export type ContractFromSpec<Name extends string, Spec extends AnyContractSpec> =
+  Spec extends UnaryContractSpec<infer InSchema, infer OutSchema>
+    ? Contract<Name, z.ZodTuple<[InSchema], null>, OutSchema, InSchema>
+    : Spec extends VariadicContractSpec<infer ArgsSchema, infer ReturnSchema>
+      ? Contract<Name, ArgsSchema, ReturnSchema, AnySchema | undefined>
+      : never
+
 export type BoundImplementation<C extends ContractLike> =
   & ImplementationFn<C>
   & {
     readonly [IMPLEMENTS]: C
   }
 
+interface NormalizedContractSpec<
+  ArgsSchema extends AnySchema,
+  ReturnSchema extends AnySchema,
+  InputSchema extends AnySchema | undefined,
+> {
+  readonly args: ArgsSchema
+  readonly returns: ReturnSchema
+  readonly input?: InputSchema
+  readonly output: ReturnSchema
+  readonly argNames?: readonly string[]
+}
+
 interface ContractState<
   Name extends string,
-  InSchema extends AnySchema,
-  OutSchema extends AnySchema,
+  ArgsSchema extends AnySchema,
+  ReturnSchema extends AnySchema,
+  InputSchema extends AnySchema | undefined,
 > {
   readonly wheres: readonly WhereClause[]
-  readonly pres: readonly PreClause<Contract<Name, InSchema, OutSchema>>[]
-  readonly posts: readonly PostClause<Contract<Name, InSchema, OutSchema>>[]
-  readonly laws: readonly LawClause<Contract<Name, InSchema, OutSchema>, any>[]
-  readonly examples: readonly ExampleClause<Contract<Name, InSchema, OutSchema>>[]
+  readonly pres: readonly PreClause<Contract<Name, ArgsSchema, ReturnSchema, InputSchema>>[]
+  readonly posts: readonly PostClause<Contract<Name, ArgsSchema, ReturnSchema, InputSchema>>[]
+  readonly laws: readonly LawClause<Contract<Name, ArgsSchema, ReturnSchema, InputSchema>, any>[]
+  readonly examples: readonly ExampleClause<Contract<Name, ArgsSchema, ReturnSchema, InputSchema>>[]
 }
 
 export const IMPLEMENTS: unique symbol = Symbol.for('@spectacles/implements') as any
@@ -244,6 +310,14 @@ function presenceClause(
 
 function isContract(value: unknown): value is AnyContract {
   return !!value && typeof value === 'object' && (value as { kind?: unknown }).kind === 'contract'
+}
+
+function isUnaryContractSpec(value: unknown): value is UnaryContractSpec<AnySchema, AnySchema> {
+  return !!value && typeof value === 'object' && 'input' in (value as object) && 'output' in (value as object)
+}
+
+function isVariadicContractSpec(value: unknown): value is VariadicContractSpec<AnySchema, AnySchema> {
+  return !!value && typeof value === 'object' && 'args' in (value as object) && 'returns' in (value as object)
 }
 
 export function field<Path extends string>(path: Path): FieldRef<Path> {
@@ -287,6 +361,11 @@ export function field<Path extends string>(path: Path): FieldRef<Path> {
   return Object.freeze(ref)
 }
 
+export function arg(indexOrName: number | string, path?: string): FieldRef {
+  const basePath = `args.${indexOrName}`
+  return field(path ? `${basePath}.${path}` : basePath)
+}
+
 export function exactlyOne(...paths: readonly string[]): ExactlyOneWhereClause {
   return Object.freeze({
     kind: 'exactly-one',
@@ -309,16 +388,56 @@ export function nonEmpty(path: string): NonEmptyWhereClause {
   })
 }
 
-function createContract<
-  const Name extends string,
+export function normalizeExampleCase<C extends ContractLike>(example: ExampleCase<C>): NormalizedExampleCase<C> {
+  if ('args' in example) {
+    return {
+      args: example.args,
+      ...(example.result !== undefined ? { result: example.result } : {}),
+    } as NormalizedExampleCase<C>
+  }
+
+  return {
+    args: [example.input] as ContractArgs<C>,
+    ...(example.output !== undefined ? { result: example.output } : {}),
+  } as NormalizedExampleCase<C>
+}
+
+function normalizeContractSpec<
   InSchema extends AnySchema,
   OutSchema extends AnySchema,
+  ArgsSchema extends AnySchema,
+  ReturnSchema extends AnySchema,
+>(
+  spec: ContractSpec<InSchema, OutSchema, ArgsSchema, ReturnSchema>,
+): NormalizedContractSpec<AnySchema, AnySchema, AnySchema | undefined> {
+  if (isUnaryContractSpec(spec)) {
+    return {
+      args: z.tuple([spec.input]) as z.ZodTuple<[typeof spec.input], null>,
+      returns: spec.output,
+      input: spec.input,
+      output: spec.output,
+    }
+  }
+
+  return {
+    args: spec.args,
+    returns: spec.returns,
+    output: spec.returns,
+    ...(spec.argNames !== undefined ? { argNames: Object.freeze([...spec.argNames]) } : {}),
+  }
+}
+
+function createContract<
+  const Name extends string,
+  ArgsSchema extends AnySchema,
+  ReturnSchema extends AnySchema,
+  InputSchema extends AnySchema | undefined,
 >(
   name: Name,
-  spec: ContractSpec<InSchema, OutSchema>,
-  state?: ContractState<Name, InSchema, OutSchema>,
-): Contract<Name, InSchema, OutSchema> {
-  const nextState: ContractState<Name, InSchema, OutSchema> = state ?? {
+  spec: NormalizedContractSpec<ArgsSchema, ReturnSchema, InputSchema>,
+  state?: ContractState<Name, ArgsSchema, ReturnSchema, InputSchema>,
+): Contract<Name, ArgsSchema, ReturnSchema, InputSchema> {
+  const nextState: ContractState<Name, ArgsSchema, ReturnSchema, InputSchema> = state ?? {
     wheres: [],
     pres: [],
     posts: [],
@@ -326,11 +445,14 @@ function createContract<
     examples: [],
   }
 
-  const contractValue: Contract<Name, InSchema, OutSchema> = {
+  const contractValue: Contract<Name, ArgsSchema, ReturnSchema, InputSchema> = {
     kind: 'contract',
     name,
-    input: spec.input,
+    args: spec.args,
+    returns: spec.returns,
     output: spec.output,
+    ...(spec.input !== undefined ? { input: spec.input } : {}),
+    ...(spec.argNames !== undefined ? { argNames: spec.argNames } : {}),
 
     wheres: freezeArray(nextState.wheres),
     pres: freezeArray(nextState.pres),
@@ -373,7 +495,11 @@ function createContract<
       })
     },
 
-    law<V extends LawVarSchemas>(clauseName: string, vars: V, predicate: LawPredicate<Contract<Name, InSchema, OutSchema>, V>) {
+    law<V extends LawVarSchemas>(
+      clauseName: string,
+      vars: V,
+      predicate: LawPredicate<Contract<Name, ArgsSchema, ReturnSchema, InputSchema>, V>,
+    ) {
       return createContract(name, spec, {
         ...nextState,
         laws: [
@@ -408,12 +534,11 @@ function createContract<
 
 export function contract<
   const Name extends string,
-  InSchema extends AnySchema,
-  OutSchema extends AnySchema,
+  Spec extends AnyContractSpec,
 >(
   name: Name,
-  spec: ContractSpec<InSchema, OutSchema>,
-): Contract<Name, InSchema, OutSchema> {
+  spec: Spec,
+): ContractFromSpec<Name, Spec> {
   if (typeof name !== 'string' || name.length === 0) {
     throw new TypeError('contract(name, spec): name must be a non-empty string')
   }
@@ -422,21 +547,22 @@ export function contract<
     throw new TypeError('contract(name, spec): spec must be an object')
   }
 
-  if (!('input' in spec) || !('output' in spec)) {
-    throw new TypeError('contract(name, spec): spec must include input and output schemas')
+  if (!isUnaryContractSpec(spec) && !isVariadicContractSpec(spec)) {
+    throw new TypeError('contract(name, spec): spec must include input/output or args/returns schemas')
   }
 
-  return createContract(name, spec)
+  return createContract(name, normalizeContractSpec(spec)) as ContractFromSpec<Name, Spec>
 }
 
 export function implement<
   const Name extends string,
-  InSchema extends AnySchema,
-  OutSchema extends AnySchema,
+  ArgsSchema extends AnySchema,
+  ReturnSchema extends AnySchema,
+  InputSchema extends AnySchema | undefined,
 >(
-  contractValue: Contract<Name, InSchema, OutSchema>,
-  fn: ImplementationFn<Contract<Name, InSchema, OutSchema>>,
-): BoundImplementation<Contract<Name, InSchema, OutSchema>> {
+  contractValue: Contract<Name, ArgsSchema, ReturnSchema, InputSchema>,
+  fn: ImplementationFn<Contract<Name, ArgsSchema, ReturnSchema, InputSchema>>,
+): BoundImplementation<Contract<Name, ArgsSchema, ReturnSchema, InputSchema>> {
   if (!isContract(contractValue)) {
     throw new TypeError('implement(contract, fn): contract must be a contract created by contract()')
   }
@@ -452,5 +578,5 @@ export function implement<
     writable: false,
   })
 
-  return fn as BoundImplementation<Contract<Name, InSchema, OutSchema>>
+  return fn as BoundImplementation<Contract<Name, ArgsSchema, ReturnSchema, InputSchema>>
 }

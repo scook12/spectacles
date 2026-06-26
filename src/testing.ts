@@ -8,14 +8,17 @@ import type {
   ImplementationFn,
   MaybePromise,
 } from './contract.js'
+import { normalizeExampleCase } from './contract.js'
 import {
   assertPredicateResult,
   assertSchema,
+  createLawContext,
+  createPostContext,
   fcOptions,
   lawVarsArbitrary,
   preconditionsHold,
-  validInputArbitrary,
-  validateExampleInput,
+  validArgsArbitrary,
+  validateExampleArgs,
 } from './testing-utils.js'
 
 export interface RunContractSuiteOptions<C extends ContractLike> {
@@ -45,10 +48,11 @@ export interface RunContractSuiteApi {
 
 export function runContractSuite<
   const Name extends string,
-  InSchema extends AnySchema,
-  OutSchema extends AnySchema,
+  ArgsSchema extends AnySchema,
+  ReturnSchema extends AnySchema,
+  InputSchema extends AnySchema | undefined,
 >(
-  options: RunContractSuiteOptions<Contract<Name, InSchema, OutSchema>>,
+  options: RunContractSuiteOptions<Contract<Name, ArgsSchema, ReturnSchema, InputSchema>>,
   api: RunContractSuiteApi,
 ): void {
   if (!options || typeof options !== 'object') {
@@ -78,44 +82,45 @@ export function runContractSuite<
   }
 
   const timeout = options.timeoutMs
-  const inputArbitrary = validInputArbitrary(contractValue, contractValue.wheres)
+  const argsArbitrary = validArgsArbitrary(contractValue, contractValue.wheres)
 
   for (const example of contractValue.examples) {
     api.it(`example: ${example.name}`, async () => {
-      const input = example.example.input
-      await validateExampleInput(contractValue, contractValue.wheres, contractValue.pres, input)
+      const normalizedExample = normalizeExampleCase(example.example)
+      const args = normalizedExample.args
+      await validateExampleArgs(contractValue, contractValue.wheres, contractValue.pres, args)
 
-      const output = await impl(input)
-      await assertSchema(contractValue.output, output, 'example output')
+      const result = await impl(...args)
+      await assertSchema(contractValue.returns, result, 'example result')
 
-      if (example.example.output !== undefined) {
-        api.expect(output).toStrictEqual(example.example.output)
+      if (normalizedExample.result !== undefined) {
+        api.expect(result).toStrictEqual(normalizedExample.result)
       }
 
       for (const post of contractValue.posts) {
         await assertPredicateResult(
           `postcondition failed: ${post.name}`,
-          post.predicate({ contract: contractValue, input, output }),
+          post.predicate(createPostContext(contractValue, args, result)),
         )
       }
     }, timeout)
   }
 
-  api.it('property: output satisfies schema and postconditions', async () => {
+  api.it('property: return satisfies schema and postconditions', async () => {
     await fc.assert(
-      fc.asyncProperty(inputArbitrary, async (input) => {
-        const shouldRun = await preconditionsHold(contractValue, contractValue.pres, input)
+      fc.asyncProperty(argsArbitrary, async (args) => {
+        const shouldRun = await preconditionsHold(contractValue, contractValue.pres, args)
         if (!shouldRun) {
           return
         }
 
-        const output = await impl(input)
-        await assertSchema(contractValue.output, output, 'property output')
+        const result = await impl(...args)
+        await assertSchema(contractValue.returns, result, 'property result')
 
         for (const post of contractValue.posts) {
           await assertPredicateResult(
             `postcondition failed: ${post.name}`,
-            post.predicate({ contract: contractValue, input, output }),
+            post.predicate(createPostContext(contractValue, args, result)),
           )
         }
       }),
@@ -126,20 +131,15 @@ export function runContractSuite<
   for (const law of contractValue.laws) {
     api.it(`law: ${law.name}`, async () => {
       await fc.assert(
-        fc.asyncProperty(inputArbitrary, lawVarsArbitrary(law.vars), async (input, vars) => {
-          const shouldRun = await preconditionsHold(contractValue, contractValue.pres, input)
+        fc.asyncProperty(argsArbitrary, lawVarsArbitrary(law.vars), async (args, vars) => {
+          const shouldRun = await preconditionsHold(contractValue, contractValue.pres, args)
           if (!shouldRun) {
             return
           }
 
           await assertPredicateResult(
             `law failed: ${law.name}`,
-            law.predicate({
-              contract: contractValue,
-              input,
-              impl,
-              ...vars,
-            }),
+            law.predicate(createLawContext(contractValue, args, impl, vars)),
           )
         }),
         fcOptions(options),

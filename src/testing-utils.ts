@@ -2,13 +2,17 @@ import * as fc from 'fast-check'
 
 import type {
   AnySchema,
+  ContractArgs,
   ContractLike,
-  ContractInput,
+  ContractReturn,
   FieldRef,
   InferLawVars,
+  LawContext,
   LawVarSchemas,
   MaybePromise,
+  PostContext,
   PreClause,
+  PreContext,
   WhereClause,
 } from './contract.js'
 
@@ -86,6 +90,47 @@ function compareValues(left: unknown, operator: 'eq' | 'ne' | 'lt' | 'lte' | 'gt
     case 'gte':
       return typeof left === 'number' && typeof right === 'number' && left >= right
   }
+}
+
+export function buildArgsRoot(args: readonly unknown[]): { args: readonly unknown[]; input?: unknown } {
+  return args.length === 1 ? { args, input: args[0] } : { args }
+}
+
+export function createPreContext<C extends ContractLike>(contract: C, args: ContractArgs<C>): PreContext<C> {
+  return {
+    ...buildArgsRoot(args),
+    contract,
+    args,
+  } as PreContext<C>
+}
+
+export function createPostContext<C extends ContractLike>(
+  contract: C,
+  args: ContractArgs<C>,
+  result: ContractReturn<C>,
+): PostContext<C> {
+  return {
+    ...buildArgsRoot(args),
+    contract,
+    args,
+    result,
+    output: result,
+  } as PostContext<C>
+}
+
+export function createLawContext<C extends ContractLike, V extends LawVarSchemas>(
+  contract: C,
+  args: ContractArgs<C>,
+  impl: (...args: ContractArgs<C>) => MaybePromise<ContractReturn<C>>,
+  vars: InferLawVars<V>,
+): LawContext<C, V> {
+  return {
+    ...buildArgsRoot(args),
+    contract,
+    args,
+    impl,
+    ...vars,
+  } as LawContext<C, V>
 }
 
 export function evaluateWhereClause(root: unknown, clause: WhereClause): boolean {
@@ -413,18 +458,18 @@ export function lawVarsArbitrary<V extends LawVarSchemas>(vars: V): fc.Arbitrary
   })
 }
 
-export function validInputArbitrary<C extends ContractLike>(
+export function validArgsArbitrary<C extends ContractLike>(
   contract: C,
   wheres: readonly WhereClause[],
-): fc.Arbitrary<ContractInput<C>> {
-  return arbitraryFromSchema(contract.input).filter((input) => {
-    if (!contract.input.safeParse(input).success) {
+): fc.Arbitrary<ContractArgs<C>> {
+  return arbitraryFromSchema(contract.args).filter((args) => {
+    if (!contract.args.safeParse(args).success) {
       return false
     }
 
-    const root = { input }
+    const root = buildArgsRoot(args)
     return wheres.every((clause) => evaluateWhereClause(root, clause))
-  }) as fc.Arbitrary<ContractInput<C>>
+  }) as fc.Arbitrary<ContractArgs<C>>
 }
 
 export async function assertSchema(schema: AnySchema, value: unknown, label: string): Promise<void> {
@@ -447,10 +492,12 @@ export async function assertPredicateResult(
 export async function preconditionsHold<C extends ContractLike>(
   contract: C,
   pres: readonly PreClause<C>[],
-  input: ContractInput<C>,
+  args: ContractArgs<C>,
 ): Promise<boolean> {
+  const context = createPreContext(contract, args)
+
   for (const pre of pres) {
-    const result = await pre.predicate({ contract, input })
+    const result = await pre.predicate(context)
     if (result === false) {
       return false
     }
@@ -459,24 +506,24 @@ export async function preconditionsHold<C extends ContractLike>(
   return true
 }
 
-export async function validateExampleInput<C extends ContractLike>(
+export async function validateExampleArgs<C extends ContractLike>(
   contract: C,
   wheres: readonly WhereClause[],
   pres: readonly PreClause<C>[],
-  input: ContractInput<C>,
+  args: ContractArgs<C>,
 ): Promise<void> {
-  await assertSchema(contract.input, input, 'example input')
+  await assertSchema(contract.args, args, 'example args')
 
-  const root = { input }
+  const root = buildArgsRoot(args)
   for (const clause of wheres) {
     if (!evaluateWhereClause(root, clause)) {
-      throw new Error(`example input violated where-clause: ${clause.kind}`)
+      throw new Error(`example args violated where-clause: ${clause.kind}`)
     }
   }
 
-  const presOkay = await preconditionsHold(contract, pres, input)
+  const presOkay = await preconditionsHold(contract, pres, args)
   if (!presOkay) {
-    throw new Error('example input violated a precondition')
+    throw new Error('example args violated a precondition')
   }
 }
 

@@ -7,10 +7,11 @@ export * from './index.js'
 
 export function runContractSuite<
   const Name extends string,
-  InSchema extends AnySchema,
-  OutSchema extends AnySchema,
+  ArgsSchema extends AnySchema,
+  ReturnSchema extends AnySchema,
+  InputSchema extends AnySchema | undefined,
 >(
-  options: RunContractSuiteOptions<Contract<Name, InSchema, OutSchema>>,
+  options: RunContractSuiteOptions<Contract<Name, ArgsSchema, ReturnSchema, InputSchema>>,
 ): void {
   runContractSuiteBase(options, { it, expect })
 }

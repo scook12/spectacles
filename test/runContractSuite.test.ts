@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 
-import { contract, field, implement, runContractSuite } from '../vitest.ts'
+import { arg, contract, field, implement, runContractSuite } from '../vitest.ts'
 
 const RangeLength = contract('RangeLength', {
   input: z.object({
@@ -28,10 +28,36 @@ const RangeLength = contract('RangeLength', {
 
 const rangeLength = implement(RangeLength, ({ start, end }) => end - start)
 
+const AddOrdered = contract('AddOrdered', {
+  args: z.tuple([z.number().int(), z.number().int()]),
+  returns: z.number().int(),
+})
+  .where(arg(0).lte(arg(1)))
+  .post('sum matches args', ({ args, result }) => result === args[0] + args[1])
+  .law('commutes when args are equal', {}, async ({ impl, args }) => {
+    if (args[0] !== args[1]) {
+      return true
+    }
+
+    return (await impl(...args)) === (await impl(args[1], args[0]))
+  })
+  .example('ordered pair', {
+    args: [2, 5],
+    result: 7,
+  })
+
+const addOrdered = implement(AddOrdered, (left, right) => left + right)
+
 describe('runContractSuite()', () => {
   runContractSuite({
     contract: RangeLength,
     impl: rangeLength,
+    numRuns: 25,
+  })
+
+  runContractSuite({
+    contract: AddOrdered,
+    impl: addOrdered,
     numRuns: 25,
   })
 
