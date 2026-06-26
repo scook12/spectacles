@@ -15,7 +15,8 @@
     "discovery.ts",
     "planning.ts",
     "rendering.ts",
-    "generation.ts"
+    "generation.ts",
+    "cli.ts"
   ],
   "exclude": [
     "test",

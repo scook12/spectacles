@@ -13,6 +13,9 @@
   "license": "MIT",
   "author": "Samuel Cook",
   "type": "module",
+  "bin": {
+    "spectacles": "./dist/cli.js"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -46,6 +49,7 @@
   ],
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "generate": "node ./dist/cli.js generate --help",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
@@ -57,6 +61,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@types/node": "^24.3.1",
     "@vitest/coverage-v8": "^3.2.6",
     "typescript": "^5.9.3"
   }

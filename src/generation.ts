@@ -24,6 +24,11 @@ export interface GenerateVitestContractFilesResult {
   readonly files: readonly GeneratedVitestContractFile[]
 }
 
+export interface GenerateVitestContractFilesFromTsConfigResult
+  extends GenerateVitestContractFilesResult {
+  readonly project: Project
+}
+
 function normalizePath(filePath: string): string {
   return filePath.replace(/\\/g, '/')
 }
@@ -198,5 +203,31 @@ export function generateVitestContractFiles(
   return {
     plan,
     files: Object.freeze(files),
+  }
+}
+
+export function generateVitestContractFilesFromTsConfig(
+  tsConfigFilePath: string,
+  options: GenerateVitestContractFilesOptions,
+): GenerateVitestContractFilesFromTsConfigResult {
+  if (typeof tsConfigFilePath !== 'string' || tsConfigFilePath.length === 0) {
+    throw new TypeError(
+      'generateVitestContractFilesFromTsConfig(tsConfigFilePath, options): tsConfigFilePath must be a non-empty string',
+    )
+  }
+
+  const project = new Project({
+    tsConfigFilePath,
+  })
+
+  const result = generateVitestContractFiles(project, {
+    ...options,
+    save: options.save ?? true,
+  })
+
+  return {
+    project,
+    plan: result.plan,
+    files: result.files,
   }
 }
