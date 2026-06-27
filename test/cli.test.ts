@@ -33,6 +33,11 @@ function createFixtureProject(): { rootDir: string; tsConfigFilePath: string } {
         input: z.string(),
         output: z.string(),
       })
+
+      export const Unused = contract('Unused', {
+        input: z.number(),
+        output: z.number(),
+      })
     `,
   )
 
@@ -43,6 +48,7 @@ function createFixtureProject(): { rootDir: string; tsConfigFilePath: string } {
       import { Echo } from './contracts'
 
       export const echo = implement(Echo, (input) => input)
+      export const unresolved = implement(MissingContract, (input) => input)
     `,
   )
 
@@ -126,9 +132,52 @@ describe('cli', () => {
       expect(exitCode).toBe(0)
       expect(out[0]).toBe('Generated 1 contract test file(s).')
       expect(out.some((line) => line.includes('echo--echo.contract.test.ts'))).toBe(true)
+      expect(out.some((line) => line.includes('Contracts without implementations: 1'))).toBe(true)
+      expect(out.some((line) => line.includes('Unused'))).toBe(true)
+      expect(out.some((line) => line.includes('Unresolved implementations: 1'))).toBe(true)
+      expect(out.some((line) => line.includes('unresolved'))).toBe(true)
       expect(err).toEqual([])
     } finally {
       rmSync(fixture.rootDir, { recursive: true, force: true })
     }
+  })
+
+  it('covers parse and run error paths', async () => {
+    expect(() => parseCliArgs(['wat'])).toThrow('Unknown command: wat')
+    expect(() => parseCliArgs(['generate', '--project'])).toThrow('Missing required option: --project')
+    expect(() => parseCliArgs(['generate', '--out', 'test/generated'])).toThrow('Missing required option: --project')
+    expect(() => parseCliArgs(['generate', '--project', 'tsconfig.json', '--out', 'out', '--runs', 'abc'])).toThrow(
+      'Invalid integer for --runs: abc',
+    )
+    expect(() => parseCliArgs(['generate', '--project', 'tsconfig.json', '--out', 'out', '--timeout'])).toThrow(
+      'Missing value for --timeout',
+    )
+    expect(() => parseCliArgs(['generate', '--project', 'tsconfig.json', '--out', 'out', '--invalid', 'boom'])).toThrow(
+      'Invalid value for --invalid: boom',
+    )
+    expect(() => parseCliArgs(['generate', '--project', 'tsconfig.json', '--out', 'out', '--mystery'])).toThrow(
+      'Unknown option: --mystery',
+    )
+
+    const out: string[] = []
+    const err: string[] = []
+    const exitCode = await runCli(['wat'], {
+      out: (message) => out.push(message),
+      err: (message) => err.push(message),
+    })
+    expect(exitCode).toBe(1)
+    expect(out).toEqual([])
+    expect(err[0]).toContain('Unknown command: wat')
+    expect(err.at(-1)).toContain('spectacles --help')
+
+    const helpOut: string[] = []
+    const helpErr: string[] = []
+    const helpExitCode = await runCli(['--help'], {
+      out: (message) => helpOut.push(message),
+      err: (message) => helpErr.push(message),
+    })
+    expect(helpExitCode).toBe(0)
+    expect(helpOut[0]).toContain('spectacles generate')
+    expect(helpErr).toEqual([])
   })
 })
