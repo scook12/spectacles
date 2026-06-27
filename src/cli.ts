@@ -12,6 +12,7 @@ export interface ParsedGenerateCommand {
   readonly numRuns?: number
   readonly timeoutMs?: number
   readonly seed?: number
+  readonly invalidArgs: 'skip' | 'reject'
   readonly includePlanComments: boolean
   readonly dryRun: boolean
 }
@@ -34,6 +35,7 @@ Options:
       --runs <number>     Number of property-based test runs per suite
       --timeout <ms>      Timeout passed to generated Vitest tests
       --seed <number>     fast-check seed for deterministic generation
+      --invalid <mode>    Invalid-arg strategy: skip | reject
       --no-comments       Omit plan comments in generated test files
       --dry-run           Do not write files; only report what would be generated
   -h, --help              Show this help message
@@ -72,6 +74,7 @@ export function parseCliArgs(argv: readonly string[]): ParsedCliCommand {
   let seed: number | undefined
   let includePlanComments = true
   let dryRun = false
+  let invalidArgs: 'skip' | 'reject' = 'skip'
 
   for (let index = 0; index < optionArgs.length; index += 1) {
     const arg = optionArgs[index]
@@ -99,6 +102,15 @@ export function parseCliArgs(argv: readonly string[]): ParsedCliCommand {
         seed = parseIntegerOption('--seed', optionArgs[index + 1])
         index += 1
         break
+      case '--invalid': {
+        const value = optionArgs[index + 1]
+        if (value !== 'skip' && value !== 'reject') {
+          throw new TypeError(`Invalid value for --invalid: ${value ?? ''}`)
+        }
+        invalidArgs = value
+        index += 1
+        break
+      }
       case '--no-comments':
         includePlanComments = false
         break
@@ -122,6 +134,7 @@ export function parseCliArgs(argv: readonly string[]): ParsedCliCommand {
     kind: 'generate',
     project,
     outputDir,
+    invalidArgs,
     includePlanComments,
     dryRun,
     ...(numRuns !== undefined ? { numRuns } : {}),
@@ -166,6 +179,7 @@ export async function runCli(
       ...(command.numRuns !== undefined ? { numRuns: command.numRuns } : {}),
       ...(command.timeoutMs !== undefined ? { timeoutMs: command.timeoutMs } : {}),
       ...(command.seed !== undefined ? { seed: command.seed } : {}),
+      ...(command.invalidArgs !== 'skip' ? { invalidArgs: command.invalidArgs } : {}),
     },
   })
 

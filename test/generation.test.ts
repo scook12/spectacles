@@ -73,7 +73,7 @@ describe('generateVitestContractFiles()', () => {
     const project = createGenerationProject()
     const result = generateVitestContractFiles(project, {
       outputDir: '/test/generated',
-      runOptions: { numRuns: 50 },
+      runOptions: { numRuns: 50, invalidArgs: 'reject' },
     })
 
     expect(result.plan.suites).toHaveLength(1)
@@ -82,6 +82,7 @@ describe('generateVitestContractFiles()', () => {
     expect(result.files[0]?.content).toContain("import { RangeLength } from '../../src/contracts.js'")
     expect(result.files[0]?.content).toContain("import { rangeLength } from '../../src/implementations.js'")
     expect(result.files[0]?.content).toContain('    numRuns: 50,')
+    expect(result.files[0]?.content).toContain('    invalidArgs: "reject",')
 
     const generatedSourceFile = project.getSourceFile('/test/generated/range-length--range-length.contract.test.ts')
     expect(generatedSourceFile?.getFullText()).toBe(result.files[0]?.content)

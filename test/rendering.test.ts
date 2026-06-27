@@ -44,6 +44,7 @@ describe('renderVitestContractSuite()', () => {
         numRuns: 250,
         timeoutMs: 10_000,
         seed: 123,
+        invalidArgs: 'reject',
       },
     })
 
@@ -55,6 +56,7 @@ describe('renderVitestContractSuite()', () => {
     expect(rendered).toContain('    numRuns: 250,')
     expect(rendered).toContain('    timeoutMs: 10000,')
     expect(rendered).toContain('    seed: 123,')
+    expect(rendered).toContain('    invalidArgs: "reject",')
     expect(rendered).toContain('Generated contract suite for RangeLength / rangeLength.')
   })
 

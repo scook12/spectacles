@@ -15,6 +15,7 @@ import {
   createLawContext,
   createPostContext,
   fcOptions,
+  invalidArgsArbitrary,
   lawVarsArbitrary,
   preconditionsHold,
   validArgsArbitrary,
@@ -27,6 +28,7 @@ export interface RunContractSuiteOptions<C extends ContractLike> {
   readonly numRuns?: number
   readonly timeoutMs?: number
   readonly seed?: number
+  readonly invalidArgs?: 'skip' | 'reject'
 }
 
 export interface AssertionLike {
@@ -83,6 +85,7 @@ export function runContractSuite<
 
   const timeout = options.timeoutMs
   const argsArbitrary = validArgsArbitrary(contractValue, contractValue.wheres)
+  const invalidArgsMode = options.invalidArgs ?? 'skip'
 
   for (const example of contractValue.examples) {
     api.it(`example: ${example.name}`, async () => {
@@ -127,6 +130,27 @@ export function runContractSuite<
       fcOptions(options),
     )
   }, timeout)
+
+  if (invalidArgsMode === 'reject') {
+    api.it('property: invalid args are rejected', async () => {
+      await fc.assert(
+        fc.asyncProperty(invalidArgsArbitrary(contractValue, contractValue.wheres), async (args) => {
+          let rejected = false
+
+          try {
+            await (impl as (...args: unknown[]) => MaybePromise<unknown>)(...args)
+          } catch {
+            rejected = true
+          }
+
+          if (!rejected) {
+            throw new Error('invalid args were accepted by the implementation')
+          }
+        }),
+        fcOptions(options),
+      )
+    }, timeout)
+  }
 
   for (const law of contractValue.laws) {
     api.it(`law: ${law.name}`, async () => {

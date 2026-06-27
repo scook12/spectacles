@@ -20,7 +20,7 @@ export interface PlannedReference {
 }
 
 export interface PlannedGenerationStep {
-  readonly kind: 'args-schema' | 'where-clauses' | 'preconditions'
+  readonly kind: 'args-schema' | 'invalid-args' | 'where-clauses' | 'preconditions'
   readonly source: PlanSource
   readonly confidence: PlanConfidence
   readonly description: string
@@ -29,7 +29,7 @@ export interface PlannedGenerationStep {
 }
 
 export interface PlannedCheck {
-  readonly kind: 'valid-args-fuzz' | 'return-schema' | 'examples' | 'postconditions' | 'laws'
+  readonly kind: 'valid-args-fuzz' | 'invalid-args-rejection' | 'return-schema' | 'examples' | 'postconditions' | 'laws'
   readonly phase: Exclude<PlanPhase, 'setup'>
   readonly source: PlanSource
   readonly confidence: PlanConfidence
@@ -53,6 +53,10 @@ export interface ContractClauseSummary {
   readonly postNames: readonly string[]
   readonly lawNames: readonly string[]
   readonly exampleNames: readonly string[]
+}
+
+export interface GenerateContractTestPlanOptions {
+  readonly invalidArgs?: 'skip' | 'reject'
 }
 
 export interface GeneratedContractTestPlan {
@@ -254,7 +258,10 @@ function describeCount(label: string, count: number): string {
   return `${count} ${label}${count === 1 ? '' : 's'}`
 }
 
-function createGenerationSteps(summary: ContractClauseSummary): PlannedGenerationStep[] {
+function createGenerationSteps(
+  summary: ContractClauseSummary,
+  options: GenerateContractTestPlanOptions,
+): PlannedGenerationStep[] {
   const steps: PlannedGenerationStep[] = [
     {
       kind: 'args-schema',
@@ -263,6 +270,15 @@ function createGenerationSteps(summary: ContractClauseSummary): PlannedGeneratio
       description: 'Generate valid argument lists from the contract args schema',
     },
   ]
+
+  if ((options.invalidArgs ?? 'skip') === 'reject') {
+    steps.push({
+      kind: 'invalid-args',
+      source: 'engine',
+      confidence: 'derived',
+      description: 'Generate invalid argument lists that violate the args schema or structured where-clauses',
+    })
+  }
 
   if (summary.whereCount > 0) {
     steps.push({
@@ -288,7 +304,10 @@ function createGenerationSteps(summary: ContractClauseSummary): PlannedGeneratio
   return steps
 }
 
-function createChecks(summary: ContractClauseSummary): PlannedCheck[] {
+function createChecks(
+  summary: ContractClauseSummary,
+  options: GenerateContractTestPlanOptions,
+): PlannedCheck[] {
   const checks: PlannedCheck[] = [
     {
       kind: 'valid-args-fuzz',
@@ -305,6 +324,16 @@ function createChecks(summary: ContractClauseSummary): PlannedCheck[] {
       description: 'Assert that returned values conform to the contract return schema',
     },
   ]
+
+  if ((options.invalidArgs ?? 'skip') === 'reject') {
+    checks.push({
+      kind: 'invalid-args-rejection',
+      phase: 'property',
+      source: 'engine',
+      confidence: 'derived',
+      description: 'Assert that invalid argument lists are rejected by the implementation',
+    })
+  }
 
   if (summary.exampleNames.length > 0) {
     checks.push({
@@ -351,7 +380,8 @@ function createSuiteName(contract: PlannedReference, implementation: PlannedRefe
 
 function planFromDiscovery(
   discovery: DiscoveryResult,
-  project?: Project,
+  project: Project | undefined,
+  options: GenerateContractTestPlanOptions,
 ): GeneratedContractTestPlan {
   const contractsByKey = new Map(discovery.contracts.map((contract) => [discoveredContractKey(contract), contract]))
   const implementationKeys = new Set<string>()
@@ -390,8 +420,8 @@ function planFromDiscovery(
       suiteName: createSuiteName(contractReference, implementationReference),
       contract: contractReference,
       implementation: implementationReference,
-      generation: Object.freeze(createGenerationSteps(summary)),
-      checks: Object.freeze(createChecks(summary)),
+      generation: Object.freeze(createGenerationSteps(summary, options)),
+      checks: Object.freeze(createChecks(summary, options)),
     })
   }
 
@@ -406,14 +436,21 @@ function planFromDiscovery(
   }
 }
 
-export function generateContractTestPlan(project: Project): GeneratedContractTestPlan
-export function generateContractTestPlan(discovery: DiscoveryResult): GeneratedContractTestPlan
+export function generateContractTestPlan(
+  project: Project,
+  options?: GenerateContractTestPlanOptions,
+): GeneratedContractTestPlan
+export function generateContractTestPlan(
+  discovery: DiscoveryResult,
+  options?: GenerateContractTestPlanOptions,
+): GeneratedContractTestPlan
 export function generateContractTestPlan(
   input: Project | DiscoveryResult,
+  options: GenerateContractTestPlanOptions = {},
 ): GeneratedContractTestPlan {
   if (input instanceof Project) {
-    return planFromDiscovery(discoverProject(input), input)
+    return planFromDiscovery(discoverProject(input), input, options)
   }
 
-  return planFromDiscovery(input)
+  return planFromDiscovery(input, undefined, options)
 }

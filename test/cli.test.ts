@@ -86,6 +86,8 @@ describe('cli', () => {
       '1000',
       '--seed',
       '7',
+      '--invalid',
+      'reject',
       '--no-comments',
       '--dry-run',
     ])).toEqual({
@@ -95,6 +97,7 @@ describe('cli', () => {
       numRuns: 25,
       timeoutMs: 1000,
       seed: 7,
+      invalidArgs: 'reject',
       includePlanComments: false,
       dryRun: true,
     })

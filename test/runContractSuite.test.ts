@@ -48,6 +48,20 @@ const AddOrdered = contract('AddOrdered', {
 
 const addOrdered = implement(AddOrdered, (left, right) => left + right)
 
+const ParseNumber = contract('ParseNumber', {
+  args: z.tuple([z.number().int()]),
+  returns: z.number().int(),
+})
+  .example('increment', {
+    input: 2,
+    output: 3,
+  })
+
+const parseNumber = implement(ParseNumber, (value) => {
+  const [parsedValue] = ParseNumber.args.parse([value])
+  return parsedValue + 1
+})
+
 describe('runContractSuite()', () => {
   runContractSuite({
     contract: RangeLength,
@@ -59,6 +73,13 @@ describe('runContractSuite()', () => {
     contract: AddOrdered,
     impl: addOrdered,
     numRuns: 25,
+  })
+
+  runContractSuite({
+    contract: ParseNumber,
+    impl: parseNumber,
+    numRuns: 25,
+    invalidArgs: 'reject',
   })
 
   it('rejects invalid options eagerly', () => {

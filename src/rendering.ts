@@ -9,6 +9,7 @@ export interface RenderVitestContractSuiteOptions {
     readonly numRuns?: number
     readonly timeoutMs?: number
     readonly seed?: number
+    readonly invalidArgs?: 'skip' | 'reject'
   }
 }
 
@@ -147,6 +148,9 @@ function renderRunOptions(options: RenderVitestContractSuiteOptions['runOptions'
   }
   if (options.seed !== undefined) {
     lines.push(`    seed: ${options.seed},`)
+  }
+  if (options.invalidArgs !== undefined && options.invalidArgs !== 'skip') {
+    lines.push(`    invalidArgs: ${JSON.stringify(options.invalidArgs)},`)
   }
   return lines
 }

@@ -51,7 +51,9 @@ function createPlanningProject(): Project {
 
 describe('generateContractTestPlan()', () => {
   it('builds suites with explicit and engine-derived checks from a project', () => {
-    const plan = generateContractTestPlan(createPlanningProject())
+    const plan = generateContractTestPlan(createPlanningProject(), {
+      invalidArgs: 'reject',
+    })
 
     expect(plan.suites).toHaveLength(1)
     expect(plan.contractsWithoutImplementations).toEqual([
@@ -92,6 +94,12 @@ describe('generateContractTestPlan()', () => {
           description: 'Generate valid argument lists from the contract args schema',
         },
         {
+          kind: 'invalid-args',
+          source: 'engine',
+          confidence: 'derived',
+          description: 'Generate invalid argument lists that violate the args schema or structured where-clauses',
+        },
+        {
           kind: 'where-clauses',
           source: 'contract',
           confidence: 'sound',
@@ -121,6 +129,13 @@ describe('generateContractTestPlan()', () => {
           source: 'engine',
           confidence: 'sound',
           description: 'Assert that returned values conform to the contract return schema',
+        },
+        {
+          kind: 'invalid-args-rejection',
+          phase: 'property',
+          source: 'engine',
+          confidence: 'derived',
+          description: 'Assert that invalid argument lists are rejected by the implementation',
         },
         {
           kind: 'examples',

@@ -474,18 +474,70 @@ export function lawVarsArbitrary<V extends LawVarSchemas>(vars: V): fc.Arbitrary
   })
 }
 
+export function areSchemaAndWhereClausesSatisfied<C extends ContractLike>(
+  contract: C,
+  wheres: readonly WhereClause[],
+  args: unknown,
+): args is ContractArgs<C> {
+  if (!contract.args.safeParse(args).success) {
+    return false
+  }
+
+  const root = buildArgsRoot(args as readonly unknown[], contract.argNames)
+  return wheres.every((clause) => evaluateWhereClause(root, clause))
+}
+
 export function validArgsArbitrary<C extends ContractLike>(
   contract: C,
   wheres: readonly WhereClause[],
 ): fc.Arbitrary<ContractArgs<C>> {
   return arbitraryFromSchema(contract.args).filter((args) => {
-    if (!contract.args.safeParse(args).success) {
-      return false
-    }
-
-    const root = buildArgsRoot(args, contract.argNames)
-    return wheres.every((clause) => evaluateWhereClause(root, clause))
+    return areSchemaAndWhereClausesSatisfied(contract, wheres, args)
   }) as fc.Arbitrary<ContractArgs<C>>
+}
+
+function invalidValueArbitrary(schema: AnySchema): fc.Arbitrary<unknown> {
+  return fc.anything({ maxDepth: 2 }).filter((value) => !schema.safeParse(value).success)
+}
+
+export function invalidArgsArbitrary<C extends ContractLike>(
+  contract: C,
+  wheres: readonly WhereClause[],
+): fc.Arbitrary<unknown[]> {
+  const def = getSchemaDef(contract.args)
+  const tupleItems = def.type === 'tuple' ? (def.items ?? []) : []
+
+  const arbitraries: fc.Arbitrary<unknown[]>[] = []
+
+  if (tupleItems.length > 0) {
+    tupleItems.forEach((invalidSchema, invalidIndex) => {
+      arbitraries.push(
+        fc.tuple(
+          ...tupleItems.map((schema, index) => {
+            return index === invalidIndex ? invalidValueArbitrary(invalidSchema) : arbitraryFromSchema(schema)
+          }),
+        ) as fc.Arbitrary<unknown[]>,
+      )
+    })
+  }
+
+  if (wheres.length > 0) {
+    arbitraries.push(
+      arbitraryFromSchema(contract.args).filter((args) => {
+        return contract.args.safeParse(args).success && !areSchemaAndWhereClausesSatisfied(contract, wheres, args)
+      }) as fc.Arbitrary<unknown[]>,
+    )
+  }
+
+  if (arbitraries.length === 0) {
+    arbitraries.push(
+      fc.anything({ maxDepth: 3 }).filter((args) => {
+        return Array.isArray(args) && !areSchemaAndWhereClausesSatisfied(contract, wheres, args)
+      }) as fc.Arbitrary<unknown[]>,
+    )
+  }
+
+  return arbitraries.length === 1 ? arbitraries[0]! : fc.oneof(...arbitraries)
 }
 
 export async function assertSchema(schema: AnySchema, value: unknown, label: string): Promise<void> {

@@ -1,3 +1,5 @@
+import { isAbsolute, resolve } from 'node:path'
+
 import { Project } from 'ts-morph'
 
 import type { GeneratedContractTestPlan, PlannedSuite } from './planning.js'
@@ -125,7 +127,8 @@ function buildFilePath(
   fileNameFactory?: (suite: PlannedSuite, index: number) => string,
 ): string {
   const rawFileName = fileNameFactory?.(suite, index) ?? defaultFileName(suite)
-  return joinPath(outputDir, rawFileName)
+  const absoluteOutputDir = isAbsolute(outputDir) ? outputDir : resolve(outputDir)
+  return joinPath(absoluteOutputDir, rawFileName)
 }
 
 export function generateVitestContractFiles(
@@ -148,7 +151,12 @@ export function generateVitestContractFiles(
     throw new TypeError('generateVitestContractFiles(project, options): options.fileName must be a function')
   }
 
-  const plan = generateContractTestPlan(project)
+  const plan = generateContractTestPlan(
+    project,
+    options.runOptions?.invalidArgs !== undefined
+      ? { invalidArgs: options.runOptions.invalidArgs }
+      : undefined,
+  )
   const usedPaths = new Set<string>()
   const files: GeneratedVitestContractFile[] = []
 
