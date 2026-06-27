@@ -11,6 +11,7 @@ This example is the "todo app" of Spectacles: a larger, service-shaped contract 
   - `ListTodos`
 - `service.ts` — a concrete in-memory implementation for those operations
 - `generate-tests.ts` — a small script that generates Vitest suites for the example
+- `generated/` — checked-in generated Vitest contract suites for the example
 - `tsconfig.json` — used by `ts-morph` discovery and generation
 
 ## Why it is modeled this way
