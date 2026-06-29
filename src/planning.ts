@@ -258,8 +258,8 @@ function contractReferenceKey(reference: PlannedReference): string {
   return `${reference.filePath}::${reference.exportName}`
 }
 
-function discoveredContractKey(contract: DiscoveredContract): string {
-  return `${contract.filePath}::${preferredExportName(contract.exportNames, contract.isDefaultExport)}`
+function discoveredContractKeys(contract: DiscoveredContract): readonly string[] {
+  return contract.exportNames.map((exportName) => `${contract.filePath}::${exportName}`)
 }
 
 function describeCount(label: string, count: number): string {
@@ -397,20 +397,51 @@ function buildScannedContractClauseSummaryIndex(
 
   for (const file of scannedFiles) {
     for (const contract of file.contracts) {
-      summaries.set(
-        `${contract.filePath}::${preferredExportName(contract.export.exportNames, contract.export.isDefaultExport)}`,
-        {
-          whereCount: contract.clauseSummary.whereCount,
-          preNames: contract.clauseSummary.preNames,
-          postNames: contract.clauseSummary.postNames,
-          lawNames: contract.clauseSummary.lawNames,
-          exampleNames: contract.clauseSummary.exampleNames,
-        },
-      )
+      const summary = {
+        whereCount: contract.clauseSummary.whereCount,
+        preNames: contract.clauseSummary.preNames,
+        postNames: contract.clauseSummary.postNames,
+        lawNames: contract.clauseSummary.lawNames,
+        exampleNames: contract.clauseSummary.exampleNames,
+      }
+
+      for (const exportName of contract.export.exportNames) {
+        summaries.set(`${contract.filePath}::${exportName}`, summary)
+      }
     }
   }
 
   return summaries
+}
+
+function collectImplementedContractKeys(
+  contract: DiscoveredContract,
+  contractsByKey: ReadonlyMap<string, DiscoveredContract>,
+  visited = new Set<string>(),
+): readonly string[] {
+  const collected = new Set<string>()
+
+  function visit(current: DiscoveredContract): void {
+    const identity = `${current.filePath}::${current.localName ?? ''}::${current.runtimeName ?? ''}::${current.exportNames.join('|')}`
+    if (visited.has(identity)) {
+      return
+    }
+    visited.add(identity)
+
+    for (const key of discoveredContractKeys(current)) {
+      collected.add(key)
+    }
+
+    if (current.source) {
+      const sourceContract = contractsByKey.get(`${current.source.filePath}::${current.source.exportName}`)
+      if (sourceContract) {
+        visit(sourceContract)
+      }
+    }
+  }
+
+  visit(contract)
+  return Object.freeze([...collected])
 }
 
 function planFromDiscovery(
@@ -419,7 +450,12 @@ function planFromDiscovery(
   scannedFiles: readonly ScannedSourceFile[] | undefined,
   options: GenerateContractTestPlanOptions,
 ): GeneratedContractTestPlan {
-  const contractsByKey = new Map(discovery.contracts.map((contract) => [discoveredContractKey(contract), contract]))
+  const contractsByKey = new Map<string, DiscoveredContract>()
+  for (const contract of discovery.contracts) {
+    for (const key of discoveredContractKeys(contract)) {
+      contractsByKey.set(key, contract)
+    }
+  }
   const clauseSummaries = buildScannedContractClauseSummaryIndex(scannedFiles)
   const implementationKeys = new Set<string>()
   const suites: PlannedSuite[] = []
@@ -438,7 +474,9 @@ function planFromDiscovery(
       continue
     }
 
-    implementationKeys.add(contractKey)
+    for (const key of collectImplementedContractKeys(contract, contractsByKey)) {
+      implementationKeys.add(key)
+    }
 
     const contractReference = toPlannedReference(contract)
     const implementationReference = toPlannedReference(implementation)
@@ -456,7 +494,7 @@ function planFromDiscovery(
   }
 
   const contractsWithoutImplementations = discovery.contracts
-    .filter((contract) => !implementationKeys.has(discoveredContractKey(contract)))
+    .filter((contract) => discoveredContractKeys(contract).every((key) => !implementationKeys.has(key)))
     .map((contract) => toPlannedReference(contract))
 
   return {

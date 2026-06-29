@@ -14,6 +14,7 @@ export interface DiscoveredContract {
   readonly exportNames: readonly string[]
   readonly isDefaultExport: boolean
   readonly runtimeName?: string
+  readonly source?: ResolvedContractReference
 }
 
 export interface ResolvedContractReference {

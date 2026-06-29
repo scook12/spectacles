@@ -10,6 +10,7 @@ import {
   createOxcDiscoveryAstScanner,
   createOxcDiscoveryBackend,
 } from '../discovery-scanner-oxc.ts'
+import { generateContractTestPlan } from '../planning.ts'
 
 function createDiscoveryWorkspaceFixture() {
   return createDiscoveryWorkspace([
@@ -114,6 +115,49 @@ function createReExportWorkspaceFixture() {
       filePath: '/src/implementations-barrel.ts',
       text: `
         export { echo as echoAlias } from './implementations'
+      `,
+    },
+  ])
+}
+
+function createDefaultReExportWorkspaceFixture() {
+  return createDiscoveryWorkspace([
+    {
+      filePath: '/src/contracts.ts',
+      text: `
+        import { contract } from 'spectacles'
+        import { z } from 'zod'
+
+        export default contract('Echo', {
+          input: z.string(),
+          output: z.string(),
+        })
+      `,
+    },
+    {
+      filePath: '/src/contracts-barrel.ts',
+      text: `
+        export { default as EchoContract } from './contracts'
+        export { default } from './contracts'
+        export * from './contracts'
+      `,
+    },
+    {
+      filePath: '/src/implementations.ts',
+      text: `
+        import DefaultEcho, { EchoContract } from './contracts-barrel'
+        import { implement } from 'spectacles'
+
+        export const echoNamed = implement(EchoContract, (input) => input)
+        export default implement(DefaultEcho, (input) => input)
+      `,
+    },
+    {
+      filePath: '/src/implementations-barrel.ts',
+      text: `
+        export { default as defaultEchoImpl, echoNamed as echoNamedAlias } from './implementations'
+        export { default } from './implementations'
+        export * from './implementations'
       `,
     },
   ])
@@ -329,6 +373,12 @@ describe('oxc discovery scanner', () => {
       exportNames: ['EchoAlias', 'Echo'],
       isDefaultExport: false,
       runtimeName: 'Echo',
+      source: {
+        filePath: '/src/contracts.ts',
+        exportName: 'Echo',
+        localName: 'Echo',
+        runtimeName: 'Echo',
+      },
     })
     expect(result.implementations).toContainEqual({
       kind: 'implementation',
@@ -356,6 +406,67 @@ describe('oxc discovery scanner', () => {
         runtimeName: 'Echo',
       },
     })
+  })
+
+  it('supports default re-export barrels for contracts and implementations across planning', () => {
+    const backend = createOxcDiscoveryBackend()
+    const discovery = backend.discover(createDefaultReExportWorkspaceFixture())
+    const plan = generateContractTestPlan({ discovery })
+
+    expect(discovery.contracts).toContainEqual({
+      kind: 'contract',
+      filePath: '/src/contracts-barrel.ts',
+      exportNames: ['EchoContract', 'default'],
+      isDefaultExport: true,
+      runtimeName: 'Echo',
+      source: {
+        filePath: '/src/contracts.ts',
+        exportName: 'default',
+        runtimeName: 'Echo',
+      },
+    })
+    expect(discovery.implementations).toContainEqual({
+      kind: 'implementation',
+      filePath: '/src/implementations.ts',
+      localName: 'echoNamed',
+      exportNames: ['echoNamed'],
+      isDefaultExport: false,
+      contract: {
+        filePath: '/src/contracts-barrel.ts',
+        exportName: 'default',
+        runtimeName: 'Echo',
+      },
+    })
+    expect(discovery.implementations).toContainEqual({
+      kind: 'implementation',
+      filePath: '/src/implementations.ts',
+      exportNames: ['default'],
+      isDefaultExport: true,
+      contract: {
+        filePath: '/src/contracts-barrel.ts',
+        exportName: 'default',
+        runtimeName: 'Echo',
+      },
+    })
+    expect(discovery.implementations).toContainEqual({
+      kind: 'implementation',
+      filePath: '/src/implementations-barrel.ts',
+      exportNames: ['defaultEchoImpl', 'default'],
+      isDefaultExport: true,
+      contract: {
+        filePath: '/src/contracts-barrel.ts',
+        exportName: 'default',
+        runtimeName: 'Echo',
+      },
+    })
+
+    expect(plan.contractsWithoutImplementations).toEqual([])
+    expect(plan.unresolvedImplementations).toEqual([])
+    expect(plan.suites).toHaveLength(4)
+    expect(plan.suites.map((suite) => suite.contract.localName)).toEqual(['Echo', 'Echo', 'Echo', 'Echo'])
+    expect(plan.suites.map((suite) => suite.implementation.localName)).toEqual(
+      expect.arrayContaining(['echoNamed', 'implementations', 'implementations-barrel']),
+    )
   })
 
   it('analyzes tsconfig-based workspaces using TypeScript file-set and module resolution', () => {

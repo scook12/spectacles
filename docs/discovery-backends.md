@@ -110,7 +110,7 @@ The first-pass OXC-backed implementation now does the following:
 2. parse source text with OXC via `createOxcDiscoveryAstScanner(...)`
 3. discover explicit contract/implementation bindings per file
 4. attach per-file source spans, clause summaries, lightweight diagnostics, and re-export metadata
-5. resolve imports and named/export-all barrel forwarding against the resolver layer through `pairDiscoveryWorkspaceScan(...)`
+5. resolve imports and named/default/export-all barrel forwarding against the resolver layer through `pairDiscoveryWorkspaceScan(...)`
 6. emit the same `DiscoveryResult` shape used today
 7. support a ready-to-use backend via `createOxcDiscoveryBackend(...)`
 8. preserve the compact `DiscoveryIndex` path

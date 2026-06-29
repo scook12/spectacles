@@ -318,6 +318,7 @@ function toDiscoveredContract(args: {
   isDefaultExport: boolean
   localName?: string
   runtimeName?: string
+  source?: ResolvedContractReference
 }): DiscoveredContract {
   const result: {
     kind: 'contract'
@@ -326,6 +327,7 @@ function toDiscoveredContract(args: {
     isDefaultExport: boolean
     localName?: string
     runtimeName?: string
+    source?: ResolvedContractReference
   } = {
     kind: 'contract',
     filePath: args.filePath,
@@ -339,6 +341,10 @@ function toDiscoveredContract(args: {
 
   if (args.runtimeName !== undefined) {
     result.runtimeName = args.runtimeName
+  }
+
+  if (args.source !== undefined) {
+    result.source = args.source
   }
 
   return result
@@ -373,7 +379,10 @@ function toDiscoveredImplementation(args: {
   return result
 }
 
-function toResolvedContractReference(contract: DiscoveredContract): ResolvedContractReference {
+function toResolvedContractReferenceWithExportName(
+  contract: DiscoveredContract,
+  exportName: string,
+): ResolvedContractReference {
   const result: {
     filePath: string
     exportName: string
@@ -381,7 +390,7 @@ function toResolvedContractReference(contract: DiscoveredContract): ResolvedCont
     runtimeName?: string
   } = {
     filePath: contract.filePath,
-    exportName: contract.exportNames[0] ?? 'default',
+    exportName,
   }
 
   if (contract.localName !== undefined) {
@@ -393,6 +402,13 @@ function toResolvedContractReference(contract: DiscoveredContract): ResolvedCont
   }
 
   return result
+}
+
+function toResolvedContractReference(contract: DiscoveredContract): ResolvedContractReference {
+  return toResolvedContractReferenceWithExportName(
+    contract,
+    preferredExportName(contract.exportNames, contract.isDefaultExport),
+  )
 }
 
 function buildContractIndexes(contracts: readonly DiscoveredContract[]): {
@@ -721,6 +737,7 @@ interface MutableDiscoveredContract {
   readonly exportNames: Set<string>
   localName?: string
   runtimeName?: string
+  source?: ResolvedContractReference
 }
 
 interface MutableDiscoveredImplementation {
@@ -756,6 +773,7 @@ function mutableContractToDiscoveredContract(contract: MutableDiscoveredContract
     isDefaultExport: contract.exportNames.has('default'),
     ...(contract.localName !== undefined ? { localName: contract.localName } : {}),
     ...(contract.runtimeName !== undefined ? { runtimeName: contract.runtimeName } : {}),
+    ...(contract.source !== undefined ? { source: contract.source } : {}),
   })
 }
 
@@ -779,7 +797,12 @@ function projectReExportedContracts(
 ): DiscoveredContract[] {
   const mutableContracts = new Map<string, MutableDiscoveredContract>()
 
-  function addAlias(filePath: string, source: DiscoveredContract, exportName: string): boolean {
+  function addAlias(
+    filePath: string,
+    source: DiscoveredContract,
+    exportName: string,
+    sourceExportName: string,
+  ): boolean {
     const identityKey = contractIdentityKey(filePath, source)
     const existing = mutableContracts.get(identityKey)
     if (existing) {
@@ -791,6 +814,7 @@ function projectReExportedContracts(
     const mutableContract: MutableDiscoveredContract = {
       filePath,
       exportNames: new Set([exportName]),
+      source: toResolvedContractReferenceWithExportName(source, sourceExportName),
     }
     if (source.localName !== undefined) {
       mutableContract.localName = source.localName
@@ -843,7 +867,7 @@ function projectReExportedContracts(
 
         if (reExport.kind === 'named') {
           const sourceContract = byExport.get(exportKey(resolution.resolvedFilePath, reExport.importedName))
-          if (sourceContract && addAlias(file.filePath, sourceContract, reExport.exportName)) {
+          if (sourceContract && addAlias(file.filePath, sourceContract, reExport.exportName, reExport.importedName)) {
             changed = true
           }
           continue
@@ -855,7 +879,7 @@ function projectReExportedContracts(
               continue
             }
 
-            if (addAlias(file.filePath, sourceContract, exportName)) {
+            if (addAlias(file.filePath, sourceContract, exportName, exportName)) {
               changed = true
             }
           }
@@ -1079,7 +1103,9 @@ export function buildDiscoveryIndex(result: DiscoveryResult): DiscoveryIndex {
 
   for (const contract of result.contracts) {
     const id = createStableNodeId('contract', contract.filePath, contract.exportNames)
-    contractIdsByKey.set(`${contract.filePath}::${contract.exportNames[0] ?? 'default'}`, id)
+    for (const exportName of contract.exportNames) {
+      contractIdsByKey.set(`${contract.filePath}::${exportName}`, id)
+    }
     implementationIdsByContractId.set(id, [])
     contractsById[id] = {
       ...contract,
