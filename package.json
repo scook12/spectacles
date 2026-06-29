@@ -74,6 +74,7 @@
   ],
   "scripts": {
     "bench:scan": "npm run build && node ./scripts/benchmark-scan.mjs",
+    "bench:backends": "npm run build && node ./scripts/benchmark-backends.mjs",
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
     "check": "npm run typecheck && npm test",
     "generate": "node ./dist/cli.js generate --help",
