@@ -1,6 +1,7 @@
 export * from './contract.js'
 export * from './testing.js'
 export * from './discovery.js'
+export * from './discovery-backend.js'
 export * from './planning.js'
 export * from './rendering.js'
 export * from './generation.js'

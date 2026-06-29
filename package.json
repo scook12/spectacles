@@ -40,6 +40,10 @@
       "types": "./dist/discovery.d.ts",
       "import": "./dist/discovery.js"
     },
+    "./discovery-backend": {
+      "types": "./dist/discovery-backend.d.ts",
+      "import": "./dist/discovery-backend.js"
+    },
     "./planning": {
       "types": "./dist/planning.d.ts",
       "import": "./dist/planning.js"
