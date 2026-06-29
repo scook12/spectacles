@@ -26,11 +26,12 @@ export type ParsedCliCommand = ParsedGenerateCommand | ParsedHelpCommand
 const HELP_TEXT = `Spectacles
 
 Usage:
-  spectacles generate --project <tsconfig.json> --out <generated-test-dir> [options]
+  spectacles generate --tsconfig <tsconfig.json> --out <generated-test-dir> [options]
   spectacles --help
 
 Options:
-  -p, --project <path>    Path to tsconfig.json used to discover source files
+  -p, --tsconfig <path>   Path to tsconfig.json used to discover source files
+      --project <path>    Alias for --tsconfig
   -o, --out <dir>         Output directory for generated contract test files
       --runs <number>     Number of property-based test runs per suite
       --timeout <ms>      Timeout passed to generated Vitest tests
@@ -81,6 +82,7 @@ export function parseCliArgs(argv: readonly string[]): ParsedCliCommand {
 
     switch (arg) {
       case '--project':
+      case '--tsconfig':
       case '-p':
         tsConfigFilePath = optionArgs[index + 1]
         index += 1
@@ -123,7 +125,7 @@ export function parseCliArgs(argv: readonly string[]): ParsedCliCommand {
   }
 
   if (!tsConfigFilePath) {
-    throw new TypeError('Missing required option: --project')
+    throw new TypeError('Missing required option: --tsconfig')
   }
 
   if (!outputDir) {

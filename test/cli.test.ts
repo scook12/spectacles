@@ -82,7 +82,7 @@ describe('cli', () => {
   it('parses generate arguments', () => {
     expect(parseCliArgs([
       'generate',
-      '--project',
+      '--tsconfig',
       'tsconfig.json',
       '--out',
       'test/generated',
@@ -115,11 +115,11 @@ describe('cli', () => {
     const err: string[] = []
 
     try {
-      expect(formatCliHelp()).toContain('spectacles generate --project <tsconfig.json> --out <generated-test-dir>')
+      expect(formatCliHelp()).toContain('spectacles generate --tsconfig <tsconfig.json> --out <generated-test-dir>')
 
       const exitCode = await runCli([
         'generate',
-        '--project',
+        '--tsconfig',
         fixture.tsConfigFilePath,
         '--out',
         join(fixture.rootDir, 'test/generated'),
@@ -144,18 +144,18 @@ describe('cli', () => {
 
   it('covers parse and run error paths', async () => {
     expect(() => parseCliArgs(['wat'])).toThrow('Unknown command: wat')
-    expect(() => parseCliArgs(['generate', '--project'])).toThrow('Missing required option: --project')
-    expect(() => parseCliArgs(['generate', '--out', 'test/generated'])).toThrow('Missing required option: --project')
-    expect(() => parseCliArgs(['generate', '--project', 'tsconfig.json', '--out', 'out', '--runs', 'abc'])).toThrow(
+    expect(() => parseCliArgs(['generate', '--tsconfig'])).toThrow('Missing required option: --tsconfig')
+    expect(() => parseCliArgs(['generate', '--out', 'test/generated'])).toThrow('Missing required option: --tsconfig')
+    expect(() => parseCliArgs(['generate', '--tsconfig', 'tsconfig.json', '--out', 'out', '--runs', 'abc'])).toThrow(
       'Invalid integer for --runs: abc',
     )
-    expect(() => parseCliArgs(['generate', '--project', 'tsconfig.json', '--out', 'out', '--timeout'])).toThrow(
+    expect(() => parseCliArgs(['generate', '--tsconfig', 'tsconfig.json', '--out', 'out', '--timeout'])).toThrow(
       'Missing value for --timeout',
     )
-    expect(() => parseCliArgs(['generate', '--project', 'tsconfig.json', '--out', 'out', '--invalid', 'boom'])).toThrow(
+    expect(() => parseCliArgs(['generate', '--tsconfig', 'tsconfig.json', '--out', 'out', '--invalid', 'boom'])).toThrow(
       'Invalid value for --invalid: boom',
     )
-    expect(() => parseCliArgs(['generate', '--project', 'tsconfig.json', '--out', 'out', '--mystery'])).toThrow(
+    expect(() => parseCliArgs(['generate', '--tsconfig', 'tsconfig.json', '--out', 'out', '--mystery'])).toThrow(
       'Unknown option: --mystery',
     )
 
