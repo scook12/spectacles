@@ -11,7 +11,7 @@
     "zod",
     "vitest",
     "oxc",
-    "typescript"
+    "typescript-compiler-api"
   ],
   "license": "MIT",
   "author": "Samuel Cook",
@@ -75,7 +75,7 @@
   ],
   "scripts": {
     "bench:scan": "npm run build && node ./scripts/benchmark-scan.mjs",
-    "bench:backends": "npm run build && node ./scripts/benchmark-backends.mjs",
+    "bench:pipeline": "npm run build && node ./scripts/benchmark-pipeline.mjs",
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
     "check": "npm run typecheck && npm test",
     "generate": "node ./dist/cli.js generate --help",

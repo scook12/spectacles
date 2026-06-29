@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest'
 
 import { createDiscoveryWorkspace } from '../discovery-backend.ts'
 import {
+  discover,
   discoverContracts,
   discoverImplementations,
-  discoverProject,
 } from '../discovery.ts'
 
 function createDiscoveryWorkspaceFixture() {
@@ -198,7 +198,7 @@ describe('discovery', () => {
   })
 
   it('discovers contracts and implementations together', () => {
-    const result = discoverProject(createDiscoveryWorkspaceFixture())
+    const result = discover(createDiscoveryWorkspaceFixture())
 
     expect(result.contracts).toHaveLength(4)
     expect(result.implementations).toHaveLength(6)

@@ -98,7 +98,7 @@ describe('cli', () => {
       '--dry-run',
     ])).toEqual({
       kind: 'generate',
-      project: 'tsconfig.json',
+      tsConfigFilePath: 'tsconfig.json',
       outputDir: 'test/generated',
       numRuns: 25,
       timeoutMs: 1000,

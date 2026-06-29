@@ -64,6 +64,6 @@ export function discoverImplementations(
   return [...analyzeDiscoveryInput(input).discovery.implementations]
 }
 
-export function discoverProject(input: DiscoveryInput): DiscoveryResult {
+export function discover(input: DiscoveryInput): DiscoveryResult {
   return analyzeDiscoveryInput(input).discovery
 }

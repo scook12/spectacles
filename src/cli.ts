@@ -7,7 +7,7 @@ export interface CliIo {
 
 export interface ParsedGenerateCommand {
   readonly kind: 'generate'
-  readonly project: string
+  readonly tsConfigFilePath: string
   readonly outputDir: string
   readonly numRuns?: number
   readonly timeoutMs?: number
@@ -67,7 +67,7 @@ export function parseCliArgs(argv: readonly string[]): ParsedCliCommand {
     throw new TypeError(`Unknown command: ${command}`)
   }
 
-  let project: string | undefined
+  let tsConfigFilePath: string | undefined
   let outputDir: string | undefined
   let numRuns: number | undefined
   let timeoutMs: number | undefined
@@ -82,7 +82,7 @@ export function parseCliArgs(argv: readonly string[]): ParsedCliCommand {
     switch (arg) {
       case '--project':
       case '-p':
-        project = optionArgs[index + 1]
+        tsConfigFilePath = optionArgs[index + 1]
         index += 1
         break
       case '--out':
@@ -122,7 +122,7 @@ export function parseCliArgs(argv: readonly string[]): ParsedCliCommand {
     }
   }
 
-  if (!project) {
+  if (!tsConfigFilePath) {
     throw new TypeError('Missing required option: --project')
   }
 
@@ -132,7 +132,7 @@ export function parseCliArgs(argv: readonly string[]): ParsedCliCommand {
 
   return {
     kind: 'generate',
-    project,
+    tsConfigFilePath,
     outputDir,
     invalidArgs,
     includePlanComments,
@@ -170,7 +170,7 @@ export async function runCli(
     return 0
   }
 
-  const result = generateVitestContractFilesFromTsConfig(command.project, {
+  const result = generateVitestContractFilesFromTsConfig(command.tsConfigFilePath, {
     outputDir: command.outputDir,
     includePlanComments: command.includePlanComments,
     writeFiles: !command.dryRun,

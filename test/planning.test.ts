@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { createDiscoveryWorkspace } from '../discovery-backend.ts'
-import { discoverProject } from '../discovery.ts'
+import { discover } from '../discovery.ts'
 import { analyzeOxcDiscoveryWorkspace } from '../discovery-scanner-oxc.ts'
 import { generateContractTestPlan } from '../planning.ts'
 
@@ -164,7 +164,7 @@ describe('generateContractTestPlan()', () => {
   })
 
   it('can plan from precomputed discovery data', () => {
-    const discovery = discoverProject(createPlanningWorkspace())
+    const discovery = discover(createPlanningWorkspace())
     const plan = generateContractTestPlan(discovery)
 
     expect(plan.suites).toHaveLength(1)
