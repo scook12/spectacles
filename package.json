@@ -11,7 +11,8 @@
     "zod",
     "vitest",
     "oxc",
-    "typescript-compiler-api"
+    "typescript-compiler-api",
+    "pi-package"
   ],
   "license": "MIT",
   "author": "Samuel Cook",
@@ -28,6 +29,11 @@
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "pi": {
+    "skills": [
+      "./skills"
+    ]
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -70,6 +76,7 @@
   "files": [
     "dist",
     "examples",
+    "skills",
     "README.md",
     "LICENSE"
   ],
