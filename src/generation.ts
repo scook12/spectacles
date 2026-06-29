@@ -3,6 +3,8 @@ import { dirname, isAbsolute, resolve } from 'node:path'
 
 import { Project } from 'ts-morph'
 
+import type { OxcTsConfigDiscoveryAnalysis } from './discovery-scanner-oxc.js'
+import { analyzeOxcDiscoveryTsConfig } from './discovery-scanner-oxc.js'
 import type { DiscoveryAnalysis, GeneratedContractTestPlan, PlannedSuite } from './planning.js'
 import { generateContractTestPlan } from './planning.js'
 import type { RenderVitestContractSuiteOptions } from './rendering.js'
@@ -39,6 +41,16 @@ export interface GenerateVitestContractFilesResult {
 export interface GenerateVitestContractFilesFromTsConfigResult
   extends GenerateVitestContractFilesResult {
   readonly project: Project
+}
+
+export interface GenerateVitestContractFilesFromTsConfigWithOxcOptions
+  extends GenerateVitestContractFilesFromAnalysisOptions {
+  readonly writeFiles?: boolean
+}
+
+export interface GenerateVitestContractFilesFromTsConfigWithOxcResult
+  extends GenerateVitestContractFilesResult {
+  readonly analysis: OxcTsConfigDiscoveryAnalysis
 }
 
 function normalizePath(filePath: string): string {
@@ -273,6 +285,32 @@ export function generateVitestContractFiles(
   }
 
   return result
+}
+
+export function generateVitestContractFilesFromTsConfigWithOxc(
+  tsConfigFilePath: string,
+  options: GenerateVitestContractFilesFromTsConfigWithOxcOptions,
+): GenerateVitestContractFilesFromTsConfigWithOxcResult {
+  if (typeof tsConfigFilePath !== 'string' || tsConfigFilePath.length === 0) {
+    throw new TypeError(
+      'generateVitestContractFilesFromTsConfigWithOxc(tsConfigFilePath, options): tsConfigFilePath must be a non-empty string',
+    )
+  }
+
+  validateGenerateOptions(options, 'generateVitestContractFilesFromTsConfigWithOxc(tsConfigFilePath, options)')
+
+  const analysis = analyzeOxcDiscoveryTsConfig(tsConfigFilePath)
+  const result = generateVitestContractFilesFromAnalysis(analysis, options)
+
+  if (options.writeFiles !== false) {
+    writeGeneratedVitestContractFiles(result.files)
+  }
+
+  return {
+    analysis,
+    plan: result.plan,
+    files: result.files,
+  }
 }
 
 export function generateVitestContractFilesFromTsConfig(

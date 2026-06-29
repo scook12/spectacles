@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -6,11 +6,12 @@ import { describe, expect, it } from 'vitest'
 import { Project } from 'ts-morph'
 
 import { createDiscoveryWorkspace } from '../discovery-backend.ts'
-import { analyzeOxcDiscoveryWorkspace } from '../discovery-scanner-oxc.ts'
+import { analyzeOxcDiscoveryTsConfig, analyzeOxcDiscoveryWorkspace } from '../discovery-scanner-oxc.ts'
 import {
   generateVitestContractFiles,
   generateVitestContractFilesFromAnalysis,
   generateVitestContractFilesFromPlan,
+  generateVitestContractFilesFromTsConfigWithOxc,
   writeGeneratedVitestContractFiles,
 } from '../generation.ts'
 
@@ -74,6 +75,58 @@ function createGenerationWorkspace() {
       `,
     },
   ])
+}
+
+function createGenerationTsConfigFixture(): { rootDir: string; tsConfigFilePath: string } {
+  const rootDir = mkdtempSync(join(tmpdir(), 'spectacles-generation-tsconfig-'))
+  const srcDir = join(rootDir, 'src')
+  mkdirSync(srcDir, { recursive: true })
+
+  writeFileSync(
+    join(rootDir, 'tsconfig.json'),
+    JSON.stringify({
+      compilerOptions: {
+        module: 'nodenext',
+        moduleResolution: 'nodenext',
+        target: 'esnext',
+        baseUrl: '.',
+        paths: {
+          '@/*': ['src/*'],
+        },
+      },
+      include: ['src/**/*.ts'],
+    }, null, 2),
+  )
+
+  writeFileSync(
+    join(srcDir, 'contracts.ts'),
+    `
+      import { contract, field } from 'spectacles'
+      import { z } from 'zod'
+
+      export const RangeLength = contract('RangeLength', {
+        input: z.object({ start: z.number(), end: z.number() }),
+        output: z.number(),
+      })
+        .where(field('input.start').lte(field('input.end')))
+        .post('difference', ({ input, output }) => output === input.end - input.start)
+    `,
+  )
+
+  writeFileSync(
+    join(srcDir, 'implementations.ts'),
+    `
+      import { implement } from 'spectacles'
+      import { RangeLength } from '@/contracts'
+
+      export const rangeLength = implement(RangeLength, ({ start, end }) => end - start)
+    `,
+  )
+
+  return {
+    rootDir,
+    tsConfigFilePath: join(rootDir, 'tsconfig.json'),
+  }
 }
 
 function createCollisionProject(): Project {
@@ -157,6 +210,30 @@ describe('generateVitestContractFiles()', () => {
     expect(result.files[0]?.content).toContain('Check 1 postcondition over generated valid argument lists')
     expect(result.files[0]?.content).toContain('    numRuns: 25,')
     expect(result.files[0]?.content).toContain('    invalidArgs: "reject",')
+  })
+
+  it('generates files from tsconfig using the OXC + TypeScript workspace path', () => {
+    const fixture = createGenerationTsConfigFixture()
+
+    try {
+      const analysis = analyzeOxcDiscoveryTsConfig(fixture.tsConfigFilePath)
+      expect(analysis.discovery.contracts).toHaveLength(1)
+
+      const result = generateVitestContractFilesFromTsConfigWithOxc(fixture.tsConfigFilePath, {
+        outputDir: join(fixture.rootDir, 'test/generated'),
+        runOptions: { invalidArgs: 'reject' },
+      })
+
+      expect(result.analysis.workspace.tsConfigFilePath).toBe(fixture.tsConfigFilePath)
+      expect(result.files).toHaveLength(1)
+      expect(readFileSync(join(fixture.rootDir, 'test/generated/range-length--range-length.contract.test.ts'), 'utf8')).toBe(
+        result.files[0]?.content,
+      )
+      expect(result.files[0]?.content).toContain('Check 1 postcondition over generated valid argument lists')
+      expect(result.files[0]?.content).toContain('    invalidArgs: "reject",')
+    } finally {
+      rmSync(fixture.rootDir, { recursive: true, force: true })
+    }
   })
 
   it('renders from a precomputed plan and can write generated files to the filesystem', () => {

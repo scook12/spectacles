@@ -1,6 +1,6 @@
 import { dirname, isAbsolute, normalize, resolve } from 'node:path'
 
-import { Project } from 'ts-morph'
+import { Project, ts } from 'ts-morph'
 
 import {
   discoverProject,
@@ -45,6 +45,10 @@ export interface DiscoveryWorkspace {
   readonly files: readonly DiscoveryWorkspaceFile[]
   readonly resolver: DiscoveryResolver
   getFile(filePath: string): DiscoveryWorkspaceFile | undefined
+}
+
+export interface TypeScriptDiscoveryWorkspace extends DiscoveryWorkspace {
+  readonly tsConfigFilePath: string
 }
 
 export interface TsMorphDiscoveryWorkspace extends DiscoveryWorkspace {
@@ -123,9 +127,24 @@ export interface ScannedImplementationCandidate {
   readonly sourceSpan?: DiscoverySourceSpan
 }
 
+export type ScannedReExportBinding =
+  | {
+    readonly kind: 'named'
+    readonly specifier: string
+    readonly importedName: string
+    readonly exportName: string
+    readonly sourceSpan?: DiscoverySourceSpan
+  }
+  | {
+    readonly kind: 'all'
+    readonly specifier: string
+    readonly sourceSpan?: DiscoverySourceSpan
+  }
+
 export interface ScannedSourceFile {
   readonly filePath: string
   readonly imports: readonly ScannedImportBinding[]
+  readonly reExports: readonly ScannedReExportBinding[]
   readonly contracts: readonly ScannedContractCandidate[]
   readonly implementations: readonly ScannedImplementationCandidate[]
   readonly diagnostics: readonly ScannedDiscoveryDiagnostic[]
@@ -469,6 +488,119 @@ export function createInMemoryDiscoveryResolver(
   }
 }
 
+function formatTypeScriptDiagnostic(diagnostic: ts.Diagnostic): string {
+  const message = ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n')
+  if (!diagnostic.file || diagnostic.start === undefined) {
+    return message
+  }
+
+  const location = diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start)
+  return `${diagnostic.file.fileName}:${location.line + 1}:${location.character + 1} ${message}`
+}
+
+function formatTypeScriptDiagnostics(diagnostics: readonly ts.Diagnostic[]): string {
+  return diagnostics.map((diagnostic) => formatTypeScriptDiagnostic(diagnostic)).join('\n')
+}
+
+export function createTypeScriptDiscoveryWorkspace(tsConfigFilePath: string): TypeScriptDiscoveryWorkspace {
+  if (typeof tsConfigFilePath !== 'string' || tsConfigFilePath.length === 0) {
+    throw new TypeError(
+      'createTypeScriptDiscoveryWorkspace(tsConfigFilePath): tsConfigFilePath must be a non-empty string',
+    )
+  }
+
+  const absoluteTsConfigFilePath = normalize(resolve(tsConfigFilePath))
+  const readResult = ts.readConfigFile(absoluteTsConfigFilePath, ts.sys.readFile)
+  if (readResult.error) {
+    throw new TypeError(
+      `createTypeScriptDiscoveryWorkspace(tsConfigFilePath): ${formatTypeScriptDiagnostic(readResult.error)}`,
+    )
+  }
+
+  const configDirectoryPath = dirname(absoluteTsConfigFilePath)
+  const parsedConfig = ts.parseJsonConfigFileContent(
+    readResult.config,
+    ts.sys,
+    configDirectoryPath,
+    undefined,
+    absoluteTsConfigFilePath,
+  )
+  if (parsedConfig.errors.length > 0) {
+    throw new TypeError(
+      `createTypeScriptDiscoveryWorkspace(tsConfigFilePath): ${formatTypeScriptDiagnostics(parsedConfig.errors)}`,
+    )
+  }
+
+  const files = parsedConfig.fileNames.flatMap((filePath) => {
+    const text = ts.sys.readFile(filePath)
+    if (text === undefined) {
+      return []
+    }
+
+    return [{
+      filePath: normalize(filePath),
+      text,
+    }]
+  })
+  const filePaths = new Set(files.map((file) => file.filePath))
+  const moduleResolutionCache = ts.createModuleResolutionCache(
+    configDirectoryPath,
+    (fileName) => ts.sys.useCaseSensitiveFileNames ? fileName : fileName.toLowerCase(),
+    parsedConfig.options,
+  )
+
+  const workspace = createDiscoveryWorkspace(files, {
+    rootDir: parsedConfig.options.rootDir ? normalize(parsedConfig.options.rootDir) : configDirectoryPath,
+    resolver: {
+      resolveModule(fromFilePath: string, specifier: string): DiscoveryModuleResolution {
+        const normalizedFromFilePath = normalize(fromFilePath)
+        const resolvedModule = ts.resolveModuleName(
+          specifier,
+          normalizedFromFilePath,
+          parsedConfig.options,
+          ts.sys,
+          moduleResolutionCache,
+        ).resolvedModule
+
+        if (!resolvedModule) {
+          return defaultResolution(normalizedFromFilePath, specifier)
+        }
+
+        const resolvedFilePath = normalize(resolvedModule.resolvedFileName)
+        if (filePaths.has(resolvedFilePath)) {
+          return {
+            fromFilePath: normalizedFromFilePath,
+            specifier,
+            resolvedFilePath,
+            resolutionKind: 'source-file',
+          }
+        }
+
+        if (resolvedModule.isExternalLibraryImport || resolvedFilePath.includes('/node_modules/')) {
+          return {
+            fromFilePath: normalizedFromFilePath,
+            specifier,
+            resolvedFilePath,
+            resolutionKind: 'external',
+          }
+        }
+
+        return {
+          fromFilePath: normalizedFromFilePath,
+          specifier,
+          resolvedFilePath: null,
+          resolutionKind: 'unresolved',
+        }
+      },
+    },
+  })
+
+  return {
+    ...workspace,
+    tsConfigFilePath: absoluteTsConfigFilePath,
+  }
+}
+
 export function createTsMorphDiscoveryWorkspace(input: TsMorphDiscoveryBackendInput): TsMorphDiscoveryWorkspace {
   const project = input instanceof Project
     ? input
@@ -584,11 +716,258 @@ function resolveScannedContractReference(
   return contractIndexes.byFileAndExport.get(exportKey(resolution.resolvedFilePath, reference.exportName)) ?? null
 }
 
+interface MutableDiscoveredContract {
+  readonly filePath: string
+  readonly exportNames: Set<string>
+  localName?: string
+  runtimeName?: string
+}
+
+interface MutableDiscoveredImplementation {
+  readonly filePath: string
+  readonly exportNames: Set<string>
+  localName?: string
+  contract: ResolvedContractReference | null
+}
+
+function contractIdentityKey(filePath: string, contract: DiscoveredContract): string {
+  return `${filePath}::${contract.localName ?? preferredExportName(contract.exportNames, contract.isDefaultExport)}::${contract.runtimeName ?? ''}`
+}
+
+function implementationIdentityKey(filePath: string, implementation: DiscoveredImplementation): string {
+  const contractKey = implementation.contract
+    ? `${implementation.contract.filePath}::${implementation.contract.exportName}`
+    : 'unresolved'
+  return `${filePath}::${implementation.localName ?? preferredExportName(implementation.exportNames, implementation.isDefaultExport)}::${contractKey}`
+}
+
+function preferredExportName(exportNames: readonly string[], isDefaultExport: boolean): string {
+  if (isDefaultExport && exportNames.includes('default')) {
+    return 'default'
+  }
+
+  return exportNames[0] ?? 'default'
+}
+
+function mutableContractToDiscoveredContract(contract: MutableDiscoveredContract): DiscoveredContract {
+  return toDiscoveredContract({
+    filePath: contract.filePath,
+    exportNames: Object.freeze([...contract.exportNames]),
+    isDefaultExport: contract.exportNames.has('default'),
+    ...(contract.localName !== undefined ? { localName: contract.localName } : {}),
+    ...(contract.runtimeName !== undefined ? { runtimeName: contract.runtimeName } : {}),
+  })
+}
+
+function mutableImplementationToDiscoveredImplementation(
+  implementation: MutableDiscoveredImplementation,
+): DiscoveredImplementation {
+  return {
+    kind: 'implementation',
+    filePath: implementation.filePath,
+    exportNames: Object.freeze([...implementation.exportNames]),
+    isDefaultExport: implementation.exportNames.has('default'),
+    ...(implementation.localName !== undefined ? { localName: implementation.localName } : {}),
+    contract: implementation.contract,
+  }
+}
+
+function projectReExportedContracts(
+  workspace: DiscoveryWorkspace,
+  scannedFiles: readonly ScannedSourceFile[],
+  localContracts: readonly DiscoveredContract[],
+): DiscoveredContract[] {
+  const mutableContracts = new Map<string, MutableDiscoveredContract>()
+
+  function addAlias(filePath: string, source: DiscoveredContract, exportName: string): boolean {
+    const identityKey = contractIdentityKey(filePath, source)
+    const existing = mutableContracts.get(identityKey)
+    if (existing) {
+      const sizeBefore = existing.exportNames.size
+      existing.exportNames.add(exportName)
+      return existing.exportNames.size !== sizeBefore
+    }
+
+    const mutableContract: MutableDiscoveredContract = {
+      filePath,
+      exportNames: new Set([exportName]),
+    }
+    if (source.localName !== undefined) {
+      mutableContract.localName = source.localName
+    }
+    if (source.runtimeName !== undefined) {
+      mutableContract.runtimeName = source.runtimeName
+    }
+
+    mutableContracts.set(identityKey, mutableContract)
+    return true
+  }
+
+  for (const contract of localContracts) {
+    const identityKey = contractIdentityKey(contract.filePath, contract)
+    const mutableContract: MutableDiscoveredContract = {
+      filePath: contract.filePath,
+      exportNames: new Set(contract.exportNames),
+    }
+    if (contract.localName !== undefined) {
+      mutableContract.localName = contract.localName
+    }
+    if (contract.runtimeName !== undefined) {
+      mutableContract.runtimeName = contract.runtimeName
+    }
+    mutableContracts.set(identityKey, mutableContract)
+  }
+
+  let changed = true
+  while (changed) {
+    changed = false
+    const discoveredContracts = [...mutableContracts.values()].map(mutableContractToDiscoveredContract)
+    const byExport = buildContractIndexes(discoveredContracts).byFileAndExport
+    const byFile = new Map<string, DiscoveredContract[]>()
+
+    for (const contract of discoveredContracts) {
+      const fileContracts = byFile.get(contract.filePath)
+      if (fileContracts) {
+        fileContracts.push(contract)
+      } else {
+        byFile.set(contract.filePath, [contract])
+      }
+    }
+
+    for (const file of scannedFiles) {
+      for (const reExport of file.reExports) {
+        const resolution = workspace.resolver.resolveModule(file.filePath, reExport.specifier)
+        if (resolution.resolutionKind !== 'source-file' || !resolution.resolvedFilePath) {
+          continue
+        }
+
+        if (reExport.kind === 'named') {
+          const sourceContract = byExport.get(exportKey(resolution.resolvedFilePath, reExport.importedName))
+          if (sourceContract && addAlias(file.filePath, sourceContract, reExport.exportName)) {
+            changed = true
+          }
+          continue
+        }
+
+        for (const sourceContract of byFile.get(resolution.resolvedFilePath) ?? []) {
+          for (const exportName of sourceContract.exportNames) {
+            if (exportName === 'default') {
+              continue
+            }
+
+            if (addAlias(file.filePath, sourceContract, exportName)) {
+              changed = true
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return [...mutableContracts.values()].map(mutableContractToDiscoveredContract)
+}
+
+function projectReExportedImplementations(
+  workspace: DiscoveryWorkspace,
+  scannedFiles: readonly ScannedSourceFile[],
+  localImplementations: readonly DiscoveredImplementation[],
+): DiscoveredImplementation[] {
+  const mutableImplementations = new Map<string, MutableDiscoveredImplementation>()
+
+  function addAlias(filePath: string, source: DiscoveredImplementation, exportName: string): boolean {
+    const identityKey = implementationIdentityKey(filePath, source)
+    const existing = mutableImplementations.get(identityKey)
+    if (existing) {
+      const sizeBefore = existing.exportNames.size
+      existing.exportNames.add(exportName)
+      return existing.exportNames.size !== sizeBefore
+    }
+
+    const mutableImplementation: MutableDiscoveredImplementation = {
+      filePath,
+      exportNames: new Set([exportName]),
+      contract: source.contract,
+    }
+    if (source.localName !== undefined) {
+      mutableImplementation.localName = source.localName
+    }
+
+    mutableImplementations.set(identityKey, mutableImplementation)
+    return true
+  }
+
+  for (const implementation of localImplementations) {
+    const identityKey = implementationIdentityKey(implementation.filePath, implementation)
+    const mutableImplementation: MutableDiscoveredImplementation = {
+      filePath: implementation.filePath,
+      exportNames: new Set(implementation.exportNames),
+      contract: implementation.contract,
+    }
+    if (implementation.localName !== undefined) {
+      mutableImplementation.localName = implementation.localName
+    }
+
+    mutableImplementations.set(identityKey, mutableImplementation)
+  }
+
+  let changed = true
+  while (changed) {
+    changed = false
+    const discoveredImplementations = [...mutableImplementations.values()].map(mutableImplementationToDiscoveredImplementation)
+    const byExport = new Map<string, DiscoveredImplementation>()
+    const byFile = new Map<string, DiscoveredImplementation[]>()
+
+    for (const implementation of discoveredImplementations) {
+      for (const exportName of implementation.exportNames) {
+        byExport.set(exportKey(implementation.filePath, exportName), implementation)
+      }
+
+      const fileImplementations = byFile.get(implementation.filePath)
+      if (fileImplementations) {
+        fileImplementations.push(implementation)
+      } else {
+        byFile.set(implementation.filePath, [implementation])
+      }
+    }
+
+    for (const file of scannedFiles) {
+      for (const reExport of file.reExports) {
+        const resolution = workspace.resolver.resolveModule(file.filePath, reExport.specifier)
+        if (resolution.resolutionKind !== 'source-file' || !resolution.resolvedFilePath) {
+          continue
+        }
+
+        if (reExport.kind === 'named') {
+          const sourceImplementation = byExport.get(exportKey(resolution.resolvedFilePath, reExport.importedName))
+          if (sourceImplementation && addAlias(file.filePath, sourceImplementation, reExport.exportName)) {
+            changed = true
+          }
+          continue
+        }
+
+        for (const sourceImplementation of byFile.get(resolution.resolvedFilePath) ?? []) {
+          for (const exportName of sourceImplementation.exportNames) {
+            if (exportName === 'default') {
+              continue
+            }
+
+            if (addAlias(file.filePath, sourceImplementation, exportName)) {
+              changed = true
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return [...mutableImplementations.values()].map(mutableImplementationToDiscoveredImplementation)
+}
+
 export function pairDiscoveryWorkspaceScan(
   workspace: DiscoveryWorkspace,
   scannedFiles: readonly ScannedSourceFile[],
 ): DiscoveryResult {
-  const contracts = scannedFiles.flatMap((file) => file.contracts).map((contract) => {
+  const localContracts = scannedFiles.flatMap((file) => file.contracts).map((contract) => {
     const discoveredContract: {
       filePath: string
       exportNames: readonly string[]
@@ -611,12 +990,13 @@ export function pairDiscoveryWorkspaceScan(
 
     return toDiscoveredContract(discoveredContract)
   })
+  const contracts = projectReExportedContracts(workspace, scannedFiles, localContracts)
   const contractIndexes = buildContractIndexes(contracts)
   const importsByFile = new Map<string, readonly ScannedImportBinding[]>(
     scannedFiles.map((file) => [file.filePath, file.imports]),
   )
 
-  const implementations = scannedFiles.flatMap((file) => file.implementations).map((implementation) => {
+  const localImplementations = scannedFiles.flatMap((file) => file.implementations).map((implementation) => {
     const resolvedContract = resolveScannedContractReference(
       workspace,
       importsByFile,
@@ -644,6 +1024,7 @@ export function pairDiscoveryWorkspaceScan(
 
     return toDiscoveredImplementation(discoveredImplementation)
   })
+  const implementations = projectReExportedImplementations(workspace, scannedFiles, localImplementations)
 
   return {
     contracts,

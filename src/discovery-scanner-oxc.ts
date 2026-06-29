@@ -10,6 +10,7 @@ import {
 import {
   analyzeDiscoveryWorkspaceWithAstScanner,
   createEmptyScannedContractClauseSummary,
+  createTypeScriptDiscoveryWorkspace,
   createWorkspaceDiscoveryBackend,
   summarizeScannedContractClauses,
   type DiscoveryAstScanner,
@@ -18,6 +19,7 @@ import {
   type DiscoverySourceSpan,
   type DiscoveryWorkspace,
   type DiscoveryWorkspaceAnalysis,
+  type TypeScriptDiscoveryWorkspace,
   type ScannedContractCandidate,
   type ScannedContractClause,
   type ScannedContractReference,
@@ -25,11 +27,16 @@ import {
   type ScannedExportBinding,
   type ScannedImportBinding,
   type ScannedImplementationCandidate,
+  type ScannedReExportBinding,
   type ScannedSourceFile,
 } from './discovery-backend.js'
 
 export interface CreateOxcDiscoveryAstScannerOptions {
   readonly parserOptions?: Omit<ParserOptions, 'range'>
+}
+
+export interface OxcTsConfigDiscoveryAnalysis extends DiscoveryWorkspaceAnalysis {
+  readonly workspace: TypeScriptDiscoveryWorkspace
 }
 
 interface MutableExportedLocalBinding {
@@ -271,6 +278,37 @@ function createImportBindings(result: ParseResult): readonly ScannedImportBindin
   return Object.freeze(bindings)
 }
 
+function createReExportBindings(result: ParseResult): readonly ScannedReExportBinding[] {
+  const bindings: ScannedReExportBinding[] = []
+
+  for (const staticExport of result.module.staticExports) {
+    for (const entry of staticExport.entries) {
+      if (entry.isType || entry.moduleRequest === null) {
+        continue
+      }
+
+      if (entry.importName.kind === 'Name' && entry.importName.name && entry.exportName.kind === 'Name' && entry.exportName.name) {
+        bindings.push(withOptionalSpan({
+          kind: 'named' as const,
+          specifier: entry.moduleRequest.value,
+          importedName: entry.importName.name,
+          exportName: entry.exportName.name,
+        }, toSourceSpan({ start: entry.start, end: entry.end })))
+        continue
+      }
+
+      if (entry.importName.kind === 'AllButDefault') {
+        bindings.push(withOptionalSpan({
+          kind: 'all' as const,
+          specifier: entry.moduleRequest.value,
+        }, toSourceSpan({ start: entry.start, end: entry.end })))
+      }
+    }
+  }
+
+  return Object.freeze(bindings)
+}
+
 function collectFactoryLocalNames(imports: readonly ScannedImportBinding[], importedName: string): ReadonlySet<string> {
   const names = new Set<string>([importedName])
 
@@ -460,6 +498,7 @@ function createScannedImplementation(args: {
 
 function scanOxcParsedFile(file: DiscoveryParsedFile<ParseResult>): ScannedSourceFile {
   const imports = createImportBindings(file.ast)
+  const reExports = createReExportBindings(file.ast)
   const contractFactoryNames = collectFactoryLocalNames(imports, 'contract')
   const implementFactoryNames = collectFactoryLocalNames(imports, 'implement')
   const namespaceImportNames = collectNamespaceImportNames(imports)
@@ -544,6 +583,7 @@ function scanOxcParsedFile(file: DiscoveryParsedFile<ParseResult>): ScannedSourc
   return {
     filePath: file.filePath,
     imports,
+    reExports,
     contracts: Object.freeze(contracts),
     implementations: Object.freeze(implementations),
     diagnostics: createDiagnostics(file.ast),
@@ -572,6 +612,20 @@ export function analyzeOxcDiscoveryWorkspace(
   options: CreateOxcDiscoveryAstScannerOptions = {},
 ): DiscoveryWorkspaceAnalysis {
   return analyzeDiscoveryWorkspaceWithAstScanner(workspace, createOxcDiscoveryAstScanner(options))
+}
+
+export function analyzeOxcDiscoveryTsConfig(
+  tsConfigFilePath: string,
+  options: CreateOxcDiscoveryAstScannerOptions = {},
+): OxcTsConfigDiscoveryAnalysis {
+  const workspace = createTypeScriptDiscoveryWorkspace(tsConfigFilePath)
+  const analysis = analyzeOxcDiscoveryWorkspace(workspace, options)
+
+  return {
+    workspace,
+    discovery: analysis.discovery,
+    scannedFiles: analysis.scannedFiles,
+  }
 }
 
 export function createOxcDiscoveryBackend(

@@ -82,8 +82,10 @@ It currently introduces:
 - `createDiscoveryWorkspace(...)`
 - `createInMemoryDiscoveryResolver(...)`
 - `createTsMorphDiscoveryWorkspace(...)`
+- `createTypeScriptDiscoveryWorkspace(...)`
 - `DiscoveryAstScanner`
 - `createOxcDiscoveryAstScanner(...)`
+- `analyzeOxcDiscoveryTsConfig(...)`
 - `createOxcDiscoveryBackend(...)`
 - `ScannedSourceFile`
 - `ScannedExportBinding`
@@ -104,18 +106,18 @@ It currently introduces:
 
 The first-pass OXC-backed implementation now does the following:
 
-1. reuse a resolver-backed `DiscoveryWorkspace`
+1. build a resolver-backed workspace from source text or `tsconfig.json`
 2. parse source text with OXC via `createOxcDiscoveryAstScanner(...)`
 3. discover explicit contract/implementation bindings per file
-4. attach per-file source spans, clause summaries, and lightweight diagnostics
-5. resolve imports against the resolver layer through `pairDiscoveryWorkspaceScan(...)`
+4. attach per-file source spans, clause summaries, lightweight diagnostics, and re-export metadata
+5. resolve imports and named/export-all barrel forwarding against the resolver layer through `pairDiscoveryWorkspaceScan(...)`
 6. emit the same `DiscoveryResult` shape used today
 7. support a ready-to-use backend via `createOxcDiscoveryBackend(...)`
 8. preserve the compact `DiscoveryIndex` path
 9. feed scanned clause summaries directly into planning without re-reading contracts through `ts-morph`
 10. render and write generated test files from discovery analysis or plans without requiring a `Project`
 
-That keeps planning and generation unchanged while removing syntax walking from `ts-morph` for the scanned workspace path and shrinking `ts-morph`'s role in generation to an optional adapter.
+That keeps planning and generation unchanged while removing syntax walking from `ts-morph` for the scanned workspace path, and it introduces an initial TypeScript-compiler-backed file-set/module-resolution path that does not require a `ts-morph Project`.
 
 ## Why this is good for AI-agent tooling
 

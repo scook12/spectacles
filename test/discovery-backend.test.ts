@@ -1,3 +1,7 @@
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
 import { describe, expect, it } from 'vitest'
 import { Project } from 'ts-morph'
 
@@ -5,6 +9,7 @@ import {
   buildDiscoveryIndex,
   createDiscoveryWorkspace,
   createEmptyScannedContractClauseSummary,
+  createTypeScriptDiscoveryWorkspace,
   createTsMorphDiscoveryBackend,
   createTsMorphDiscoveryWorkspace,
   createWorkspaceDiscoveryBackend,
@@ -50,6 +55,66 @@ function createDiscoveryProject(): Project {
   )
 
   return project
+}
+
+function createTsConfigWorkspaceFixture(): { rootDir: string; tsConfigFilePath: string } {
+  const rootDir = mkdtempSync(join(tmpdir(), 'spectacles-tsconfig-workspace-'))
+  const srcDir = join(rootDir, 'src')
+  const ignoredDir = join(rootDir, 'ignored')
+  mkdirSync(srcDir, { recursive: true })
+  mkdirSync(ignoredDir, { recursive: true })
+
+  writeFileSync(
+    join(rootDir, 'tsconfig.json'),
+    JSON.stringify({
+      compilerOptions: {
+        module: 'nodenext',
+        moduleResolution: 'nodenext',
+        target: 'esnext',
+        baseUrl: '.',
+        paths: {
+          '@/*': ['src/*'],
+        },
+      },
+      include: ['src/**/*.ts'],
+      exclude: ['ignored/**'],
+    }, null, 2),
+  )
+
+  writeFileSync(
+    join(srcDir, 'contracts.ts'),
+    `
+      import { contract } from 'spectacles'
+      import { z } from 'zod'
+
+      export const Echo = contract('Echo', {
+        input: z.string(),
+        output: z.string(),
+      })
+    `,
+  )
+
+  writeFileSync(
+    join(srcDir, 'implementations.ts'),
+    `
+      import { implement } from 'spectacles'
+      import { Echo } from '@/contracts'
+
+      export const echo = implement(Echo, (input) => input)
+    `,
+  )
+
+  writeFileSync(
+    join(ignoredDir, 'ignored.ts'),
+    `
+      export const ignored = true
+    `,
+  )
+
+  return {
+    rootDir,
+    tsConfigFilePath: join(rootDir, 'tsconfig.json'),
+  }
 }
 
 describe('discovery backend sketch', () => {
@@ -118,6 +183,30 @@ describe('discovery backend sketch', () => {
     expect(workspace.resolver.resolveModule('/src/contracts.ts', 'zod').resolutionKind).toBe('external')
   })
 
+  it('creates a resolver-backed workspace from tsconfig file-set and TypeScript module resolution', () => {
+    const fixture = createTsConfigWorkspaceFixture()
+
+    try {
+      const workspace = createTypeScriptDiscoveryWorkspace(fixture.tsConfigFilePath)
+
+      expect(workspace.tsConfigFilePath).toBe(fixture.tsConfigFilePath)
+      expect(workspace.files.some((file) => file.filePath.endsWith('/src/contracts.ts'))).toBe(true)
+      expect(workspace.files.some((file) => file.filePath.endsWith('/src/implementations.ts'))).toBe(true)
+      expect(workspace.files.some((file) => file.filePath.endsWith('/ignored/ignored.ts'))).toBe(false)
+
+      const implementationsFilePath = join(fixture.rootDir, 'src', 'implementations.ts')
+      expect(workspace.resolver.resolveModule(implementationsFilePath, '@/contracts')).toEqual({
+        fromFilePath: implementationsFilePath,
+        specifier: '@/contracts',
+        resolvedFilePath: join(fixture.rootDir, 'src', 'contracts.ts'),
+        resolutionKind: 'source-file',
+      })
+      expect(workspace.resolver.resolveModule(implementationsFilePath, 'zod').resolutionKind).toBe('external')
+    } finally {
+      rmSync(fixture.rootDir, { recursive: true, force: true })
+    }
+  })
+
   it('pairs a scanned source-text workspace into contracts and implementations', () => {
     const workspace = createDiscoveryWorkspace([
       {
@@ -134,6 +223,7 @@ describe('discovery backend sketch', () => {
       {
         filePath: '/src/contracts.ts',
         imports: [],
+        reExports: [],
         diagnostics: [],
         contracts: [
           {
@@ -171,6 +261,7 @@ describe('discovery backend sketch', () => {
           },
         ],
         diagnostics: [],
+        reExports: [],
         contracts: [],
         implementations: [
           {
@@ -231,6 +322,7 @@ describe('discovery backend sketch', () => {
           return {
             filePath: file.filePath,
             imports: [],
+            reExports: [],
             diagnostics: [],
             contracts: [
               {
@@ -267,6 +359,7 @@ describe('discovery backend sketch', () => {
               sourceSpan: { start: 0, end: 10 },
             },
           ],
+          reExports: [],
           diagnostics: [
             {
               severity: 'info',
