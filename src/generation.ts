@@ -1,8 +1,9 @@
-import { isAbsolute, resolve } from 'node:path'
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { dirname, isAbsolute, resolve } from 'node:path'
 
 import { Project } from 'ts-morph'
 
-import type { GeneratedContractTestPlan, PlannedSuite } from './planning.js'
+import type { DiscoveryAnalysis, GeneratedContractTestPlan, PlannedSuite } from './planning.js'
 import { generateContractTestPlan } from './planning.js'
 import type { RenderVitestContractSuiteOptions } from './rendering.js'
 import { renderVitestContractSuite } from './rendering.js'
@@ -13,11 +14,19 @@ export interface GeneratedVitestContractFile {
   readonly content: string
 }
 
-export interface GenerateVitestContractFilesOptions
+export interface GenerateVitestContractFileArtifactsOptions
   extends Omit<RenderVitestContractSuiteOptions, 'outputFilePath'> {
   readonly outputDir: string
   readonly fileName?: (suite: PlannedSuite, index: number) => string
+}
+
+export interface GenerateVitestContractFilesFromAnalysisOptions
+  extends GenerateVitestContractFileArtifactsOptions {
   readonly plan?: GeneratedContractTestPlan
+}
+
+export interface GenerateVitestContractFilesOptions
+  extends GenerateVitestContractFilesFromAnalysisOptions {
   readonly writeToProject?: boolean
   readonly save?: boolean
 }
@@ -132,32 +141,27 @@ function buildFilePath(
   return joinPath(absoluteOutputDir, rawFileName)
 }
 
-export function generateVitestContractFiles(
-  project: Project,
-  options: GenerateVitestContractFilesOptions,
-): GenerateVitestContractFilesResult {
-  if (!(project instanceof Project)) {
-    throw new TypeError('generateVitestContractFiles(project, options): project must be a ts-morph Project')
-  }
-
+function validateGenerateOptions(
+  options: GenerateVitestContractFileArtifactsOptions | GenerateVitestContractFilesOptions,
+  callerName: string,
+): void {
   if (!options || typeof options !== 'object') {
-    throw new TypeError('generateVitestContractFiles(project, options): options must be an object')
+    throw new TypeError(`${callerName}: options must be an object`)
   }
 
   if (typeof options.outputDir !== 'string' || options.outputDir.length === 0) {
-    throw new TypeError('generateVitestContractFiles(project, options): options.outputDir must be a non-empty string')
+    throw new TypeError(`${callerName}: options.outputDir must be a non-empty string`)
   }
 
   if (options.fileName && typeof options.fileName !== 'function') {
-    throw new TypeError('generateVitestContractFiles(project, options): options.fileName must be a function')
+    throw new TypeError(`${callerName}: options.fileName must be a function`)
   }
+}
 
-  const plan = options.plan ?? generateContractTestPlan(
-    project,
-    options.runOptions?.invalidArgs !== undefined
-      ? { invalidArgs: options.runOptions.invalidArgs }
-      : undefined,
-  )
+function renderVitestContractFilesFromPlan(
+  plan: GeneratedContractTestPlan,
+  options: GenerateVitestContractFileArtifactsOptions,
+): GenerateVitestContractFilesResult {
   const usedPaths = new Set<string>()
   const files: GeneratedVitestContractFile[] = []
 
@@ -190,17 +194,76 @@ export function generateVitestContractFiles(
       renderOptions.runOptions = options.runOptions
     }
 
-    const content = renderVitestContractSuite(suite, renderOptions)
-
     files.push({
       suite,
       outputFilePath,
-      content,
+      content: renderVitestContractSuite(suite, renderOptions),
     })
   })
 
+  return {
+    plan,
+    files: Object.freeze(files),
+  }
+}
+
+export function generateVitestContractFilesFromPlan(
+  plan: GeneratedContractTestPlan,
+  options: GenerateVitestContractFileArtifactsOptions,
+): GenerateVitestContractFilesResult {
+  validateGenerateOptions(options, 'generateVitestContractFilesFromPlan(plan, options)')
+  return renderVitestContractFilesFromPlan(plan, options)
+}
+
+export function generateVitestContractFilesFromAnalysis(
+  analysis: DiscoveryAnalysis,
+  options: GenerateVitestContractFilesFromAnalysisOptions,
+): GenerateVitestContractFilesResult {
+  if (!analysis || typeof analysis !== 'object' || !('discovery' in analysis)) {
+    throw new TypeError(
+      'generateVitestContractFilesFromAnalysis(analysis, options): analysis must include discovery data',
+    )
+  }
+
+  validateGenerateOptions(options, 'generateVitestContractFilesFromAnalysis(analysis, options)')
+
+  const plan = options.plan ?? generateContractTestPlan(
+    analysis,
+    options.runOptions?.invalidArgs !== undefined
+      ? { invalidArgs: options.runOptions.invalidArgs }
+      : undefined,
+  )
+
+  return renderVitestContractFilesFromPlan(plan, options)
+}
+
+export function writeGeneratedVitestContractFiles(files: readonly GeneratedVitestContractFile[]): void {
+  for (const file of files) {
+    mkdirSync(dirname(file.outputFilePath), { recursive: true })
+    writeFileSync(file.outputFilePath, file.content)
+  }
+}
+
+export function generateVitestContractFiles(
+  project: Project,
+  options: GenerateVitestContractFilesOptions,
+): GenerateVitestContractFilesResult {
+  if (!(project instanceof Project)) {
+    throw new TypeError('generateVitestContractFiles(project, options): project must be a ts-morph Project')
+  }
+
+  validateGenerateOptions(options, 'generateVitestContractFiles(project, options)')
+
+  const plan = options.plan ?? generateContractTestPlan(
+    project,
+    options.runOptions?.invalidArgs !== undefined
+      ? { invalidArgs: options.runOptions.invalidArgs }
+      : undefined,
+  )
+  const result = renderVitestContractFilesFromPlan(plan, options)
+
   if (options.writeToProject !== false) {
-    for (const file of files) {
+    for (const file of result.files) {
       project.createSourceFile(file.outputFilePath, file.content, { overwrite: true })
     }
 
@@ -209,10 +272,7 @@ export function generateVitestContractFiles(
     }
   }
 
-  return {
-    plan,
-    files: Object.freeze(files),
-  }
+  return result
 }
 
 export function generateVitestContractFilesFromTsConfig(

@@ -14,6 +14,7 @@
     "vitest.ts",
     "discovery.ts",
     "discovery-backend.ts",
+    "discovery-scanner-oxc.ts",
     "planning.ts",
     "rendering.ts",
     "generation.ts",

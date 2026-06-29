@@ -44,6 +44,10 @@
       "types": "./dist/discovery-backend.d.ts",
       "import": "./dist/discovery-backend.js"
     },
+    "./discovery-scanner-oxc": {
+      "types": "./dist/discovery-scanner-oxc.d.ts",
+      "import": "./dist/discovery-scanner-oxc.js"
+    },
     "./planning": {
       "types": "./dist/planning.d.ts",
       "import": "./dist/planning.js"

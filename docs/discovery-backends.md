@@ -31,11 +31,12 @@ That layer can continue to use TypeScript resolution internally even if the synt
 
 This layer should be backend-pluggable.
 
-Current backend:
+Current backends:
 - `ts-morph`
+- first-pass `oxc` scanner module (`src/discovery-scanner-oxc.ts`)
 
-Planned backend:
-- `oxc`
+Planned next step:
+- deepen the `oxc` scanner coverage until it can replace most syntax-walking dependence on `ts-morph`
 
 The scanner should stay **syntax-first** and **explicit**. Spectacles already benefits from explicit `contract(...)` and `implement(...)` bindings, so the scanner can avoid type-checker-heavy inference and instead focus on:
 
@@ -82,6 +83,8 @@ It currently introduces:
 - `createInMemoryDiscoveryResolver(...)`
 - `createTsMorphDiscoveryWorkspace(...)`
 - `DiscoveryAstScanner`
+- `createOxcDiscoveryAstScanner(...)`
+- `createOxcDiscoveryBackend(...)`
 - `ScannedSourceFile`
 - `ScannedExportBinding`
 - `ScannedContractClause`
@@ -90,6 +93,7 @@ It currently introduces:
 - `summarizeScannedContractClauses(...)`
 - `scanDiscoveryWorkspace(...)`
 - `pairDiscoveryWorkspaceScan(...)`
+- `analyzeDiscoveryWorkspaceWithAstScanner(...)`
 - `discoverWorkspaceWithAstScanner(...)`
 - `createWorkspaceDiscoveryBackend(...)`
 - `createTsMorphDiscoveryBackend()`
@@ -98,18 +102,20 @@ It currently introduces:
 
 ## OXC backend MVP
 
-A practical first OXC-backed implementation should:
+The first-pass OXC-backed implementation now does the following:
 
-1. reuse a TS-backed resolver/file-set layer
-2. build a `DiscoveryWorkspace`
-3. parse source text with OXC via `DiscoveryAstScanner`
-4. discover explicit contract/implementation bindings per file
-5. attach per-file source spans, clause summaries, and lightweight diagnostics
-6. resolve imports against the resolver layer through `pairDiscoveryWorkspaceScan(...)`
-7. emit the same `DiscoveryResult` shape used today
-8. build the same compact `DiscoveryIndex`
+1. reuse a resolver-backed `DiscoveryWorkspace`
+2. parse source text with OXC via `createOxcDiscoveryAstScanner(...)`
+3. discover explicit contract/implementation bindings per file
+4. attach per-file source spans, clause summaries, and lightweight diagnostics
+5. resolve imports against the resolver layer through `pairDiscoveryWorkspaceScan(...)`
+6. emit the same `DiscoveryResult` shape used today
+7. support a ready-to-use backend via `createOxcDiscoveryBackend(...)`
+8. preserve the compact `DiscoveryIndex` path
+9. feed scanned clause summaries directly into planning without re-reading contracts through `ts-morph`
+10. render and write generated test files from discovery analysis or plans without requiring a `Project`
 
-That keeps planning and generation unchanged while removing most syntax-walking dependence on `ts-morph`.
+That keeps planning and generation unchanged while removing syntax walking from `ts-morph` for the scanned workspace path and shrinking `ts-morph`'s role in generation to an optional adapter.
 
 ## Why this is good for AI-agent tooling
 

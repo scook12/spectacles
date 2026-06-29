@@ -174,6 +174,11 @@ export interface DiscoveryIndex {
   readonly unimplementedContractIds: readonly string[]
 }
 
+export interface DiscoveryWorkspaceAnalysis {
+  readonly discovery: DiscoveryResult
+  readonly scannedFiles: readonly ScannedSourceFile[]
+}
+
 const SOURCE_FILE_RESOLUTION_SUFFIXES = [
   '',
   '.ts',
@@ -646,11 +651,23 @@ export function pairDiscoveryWorkspaceScan(
   }
 }
 
+export function analyzeDiscoveryWorkspaceWithAstScanner<Ast>(
+  workspace: DiscoveryWorkspace,
+  scanner: DiscoveryAstScanner<Ast>,
+): DiscoveryWorkspaceAnalysis {
+  const scannedFiles = Object.freeze(scanDiscoveryWorkspace(workspace, scanner))
+
+  return {
+    scannedFiles,
+    discovery: pairDiscoveryWorkspaceScan(workspace, scannedFiles),
+  }
+}
+
 export function discoverWorkspaceWithAstScanner<Ast>(
   workspace: DiscoveryWorkspace,
   scanner: DiscoveryAstScanner<Ast>,
 ): DiscoveryResult {
-  return pairDiscoveryWorkspaceScan(workspace, scanDiscoveryWorkspace(workspace, scanner))
+  return analyzeDiscoveryWorkspaceWithAstScanner(workspace, scanner).discovery
 }
 
 export function createWorkspaceDiscoveryBackend<Ast>(args: {

@@ -1,5 +1,6 @@
 import { Node, Project, SourceFile } from 'ts-morph'
 
+import type { ScannedSourceFile } from './discovery-backend.js'
 import type {
   DiscoveredContract,
   DiscoveredImplementation,
@@ -59,9 +60,13 @@ export interface GenerateContractTestPlanOptions {
   readonly invalidArgs?: 'skip' | 'reject'
 }
 
-export interface ProjectAnalysis {
-  readonly project: Project
+export interface DiscoveryAnalysis {
   readonly discovery: DiscoveryResult
+  readonly scannedFiles?: readonly ScannedSourceFile[]
+}
+
+export interface ProjectAnalysis extends DiscoveryAnalysis {
+  readonly project: Project
 }
 
 export interface GeneratedContractTestPlan {
@@ -225,27 +230,25 @@ function summarizeContractClausesFromExpression(expression: Node): ContractClaus
   }
 }
 
+function emptyContractClauseSummary(): ContractClauseSummary {
+  return {
+    whereCount: 0,
+    preNames: Object.freeze([]),
+    postNames: Object.freeze([]),
+    lawNames: Object.freeze([]),
+    exampleNames: Object.freeze([]),
+  }
+}
+
 function summarizeContractClauses(project: Project, contract: DiscoveredContract): ContractClauseSummary {
   const sourceFile = findSourceFile(project, contract.filePath)
   if (!sourceFile) {
-    return {
-      whereCount: 0,
-      preNames: Object.freeze([]),
-      postNames: Object.freeze([]),
-      lawNames: Object.freeze([]),
-      exampleNames: Object.freeze([]),
-    }
+    return emptyContractClauseSummary()
   }
 
   const expression = findContractExpression(sourceFile, contract)
   if (!expression) {
-    return {
-      whereCount: 0,
-      preNames: Object.freeze([]),
-      postNames: Object.freeze([]),
-      lawNames: Object.freeze([]),
-      exampleNames: Object.freeze([]),
-    }
+    return emptyContractClauseSummary()
   }
 
   return summarizeContractClausesFromExpression(expression)
@@ -383,12 +386,41 @@ function createSuiteName(contract: PlannedReference, implementation: PlannedRefe
   return `${contract.localName} / ${implementation.localName}`
 }
 
+function buildScannedContractClauseSummaryIndex(
+  scannedFiles: readonly ScannedSourceFile[] | undefined,
+): ReadonlyMap<string, ContractClauseSummary> {
+  if (!scannedFiles) {
+    return new Map()
+  }
+
+  const summaries = new Map<string, ContractClauseSummary>()
+
+  for (const file of scannedFiles) {
+    for (const contract of file.contracts) {
+      summaries.set(
+        `${contract.filePath}::${preferredExportName(contract.export.exportNames, contract.export.isDefaultExport)}`,
+        {
+          whereCount: contract.clauseSummary.whereCount,
+          preNames: contract.clauseSummary.preNames,
+          postNames: contract.clauseSummary.postNames,
+          lawNames: contract.clauseSummary.lawNames,
+          exampleNames: contract.clauseSummary.exampleNames,
+        },
+      )
+    }
+  }
+
+  return summaries
+}
+
 function planFromDiscovery(
   discovery: DiscoveryResult,
   project: Project | undefined,
+  scannedFiles: readonly ScannedSourceFile[] | undefined,
   options: GenerateContractTestPlanOptions,
 ): GeneratedContractTestPlan {
   const contractsByKey = new Map(discovery.contracts.map((contract) => [discoveredContractKey(contract), contract]))
+  const clauseSummaries = buildScannedContractClauseSummaryIndex(scannedFiles)
   const implementationKeys = new Set<string>()
   const suites: PlannedSuite[] = []
   const unresolvedImplementations: PlannedReference[] = []
@@ -410,15 +442,8 @@ function planFromDiscovery(
 
     const contractReference = toPlannedReference(contract)
     const implementationReference = toPlannedReference(implementation)
-    const summary = project
-      ? summarizeContractClauses(project, contract)
-      : {
-          whereCount: 0,
-          preNames: Object.freeze([]),
-          postNames: Object.freeze([]),
-          lawNames: Object.freeze([]),
-          exampleNames: Object.freeze([]),
-        }
+    const summary = clauseSummaries.get(contractKey)
+      ?? (project ? summarizeContractClauses(project, contract) : emptyContractClauseSummary())
 
     suites.push({
       kind: 'suite',
@@ -450,20 +475,29 @@ export function generateContractTestPlan(
   options?: GenerateContractTestPlanOptions,
 ): GeneratedContractTestPlan
 export function generateContractTestPlan(
+  analysis: DiscoveryAnalysis,
+  options?: GenerateContractTestPlanOptions,
+): GeneratedContractTestPlan
+export function generateContractTestPlan(
   analysis: ProjectAnalysis,
   options?: GenerateContractTestPlanOptions,
 ): GeneratedContractTestPlan
 export function generateContractTestPlan(
-  input: Project | DiscoveryResult | ProjectAnalysis,
+  input: Project | DiscoveryResult | DiscoveryAnalysis | ProjectAnalysis,
   options: GenerateContractTestPlanOptions = {},
 ): GeneratedContractTestPlan {
   if (input instanceof Project) {
-    return planFromDiscovery(discoverProject(input), input, options)
+    return planFromDiscovery(discoverProject(input), input, undefined, options)
   }
 
-  if ('project' in input && 'discovery' in input) {
-    return planFromDiscovery(input.discovery, input.project, options)
+  if ('discovery' in input) {
+    return planFromDiscovery(
+      input.discovery,
+      'project' in input ? input.project : undefined,
+      input.scannedFiles,
+      options,
+    )
   }
 
-  return planFromDiscovery(input, undefined, options)
+  return planFromDiscovery(input, undefined, undefined, options)
 }
