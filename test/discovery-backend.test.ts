@@ -4,11 +4,13 @@ import { Project } from 'ts-morph'
 import {
   buildDiscoveryIndex,
   createDiscoveryWorkspace,
+  createEmptyScannedContractClauseSummary,
   createTsMorphDiscoveryBackend,
   createTsMorphDiscoveryWorkspace,
   createWorkspaceDiscoveryBackend,
   describeOxcDiscoveryBackendPlan,
   pairDiscoveryWorkspaceScan,
+  summarizeScannedContractClauses,
   type DiscoveryAstScanner,
 } from '../discovery-backend.ts'
 
@@ -78,6 +80,30 @@ describe('discovery backend sketch', () => {
     expect(unresolvedImplementation?.contractId).toBeNull()
   })
 
+  it('summarizes scanned contract clauses for planning and agent navigation', () => {
+    expect(summarizeScannedContractClauses([
+      { kind: 'where', argumentCount: 2 },
+      { kind: 'pre', name: 'precondition A', argumentCount: 2 },
+      { kind: 'post', name: 'postcondition A', argumentCount: 2 },
+      { kind: 'law', name: 'law A', argumentCount: 3 },
+      { kind: 'example', name: 'example A', argumentCount: 2 },
+    ])).toEqual({
+      whereCount: 2,
+      preNames: ['precondition A'],
+      postNames: ['postcondition A'],
+      lawNames: ['law A'],
+      exampleNames: ['example A'],
+    })
+
+    expect(createEmptyScannedContractClauseSummary()).toEqual({
+      whereCount: 0,
+      preNames: [],
+      postNames: [],
+      lawNames: [],
+      exampleNames: [],
+    })
+  })
+
   it('creates a resolver-backed workspace from ts-morph project files', () => {
     const workspace = createTsMorphDiscoveryWorkspace(createDiscoveryProject())
 
@@ -108,14 +134,27 @@ describe('discovery backend sketch', () => {
       {
         filePath: '/src/contracts.ts',
         imports: [],
+        diagnostics: [],
         contracts: [
           {
             kind: 'contract',
             filePath: '/src/contracts.ts',
-            localName: 'Echo',
-            exportNames: ['Echo'],
-            isDefaultExport: false,
+            export: {
+              localName: 'Echo',
+              exportNames: ['Echo'],
+              isDefaultExport: false,
+              sourceSpan: { start: 0, end: 4 },
+            },
             runtimeName: 'Echo',
+            clauses: [
+              { kind: 'where', argumentCount: 1, sourceSpan: { start: 5, end: 10 } },
+              { kind: 'post', name: 'echoes input', argumentCount: 2, sourceSpan: { start: 11, end: 20 } },
+            ],
+            clauseSummary: summarizeScannedContractClauses([
+              { kind: 'where', argumentCount: 1 },
+              { kind: 'post', name: 'echoes input', argumentCount: 2 },
+            ]),
+            sourceSpan: { start: 0, end: 20 },
           },
         ],
         implementations: [],
@@ -128,20 +167,27 @@ describe('discovery backend sketch', () => {
             specifier: './contracts',
             localName: 'EchoAlias',
             importedName: 'Echo',
+            sourceSpan: { start: 0, end: 10 },
           },
         ],
+        diagnostics: [],
         contracts: [],
         implementations: [
           {
             kind: 'implementation',
             filePath: '/src/implementations.ts',
-            localName: 'echo',
-            exportNames: ['echo'],
-            isDefaultExport: false,
+            export: {
+              localName: 'echo',
+              exportNames: ['echo'],
+              isDefaultExport: false,
+              sourceSpan: { start: 11, end: 15 },
+            },
             contractReference: {
               kind: 'identifier',
               name: 'EchoAlias',
+              sourceSpan: { start: 16, end: 25 },
             },
+            sourceSpan: { start: 11, end: 25 },
           },
         ],
       },
@@ -185,14 +231,25 @@ describe('discovery backend sketch', () => {
           return {
             filePath: file.filePath,
             imports: [],
+            diagnostics: [],
             contracts: [
               {
                 kind: 'contract',
                 filePath: file.filePath,
-                localName: 'Echo',
-                exportNames: ['Echo'],
-                isDefaultExport: false,
+                export: {
+                  localName: 'Echo',
+                  exportNames: ['Echo'],
+                  isDefaultExport: false,
+                  sourceSpan: { start: 0, end: 4 },
+                },
                 runtimeName: 'Echo',
+                clauses: [
+                  { kind: 'example', name: 'round-trip', argumentCount: 2, sourceSpan: { start: 5, end: 15 } },
+                ],
+                clauseSummary: summarizeScannedContractClauses([
+                  { kind: 'example', name: 'round-trip', argumentCount: 2 },
+                ]),
+                sourceSpan: { start: 0, end: 15 },
               },
             ],
             implementations: [],
@@ -207,6 +264,14 @@ describe('discovery backend sketch', () => {
               specifier: './contracts',
               localName: 'Echo',
               importedName: 'Echo',
+              sourceSpan: { start: 0, end: 10 },
+            },
+          ],
+          diagnostics: [
+            {
+              severity: 'info',
+              message: 'implementation scanned successfully',
+              sourceSpan: { start: 11, end: 20 },
             },
           ],
           contracts: [],
@@ -214,13 +279,18 @@ describe('discovery backend sketch', () => {
             {
               kind: 'implementation',
               filePath: file.filePath,
-              localName: 'echo',
-              exportNames: ['echo'],
-              isDefaultExport: false,
+              export: {
+                localName: 'echo',
+                exportNames: ['echo'],
+                isDefaultExport: false,
+                sourceSpan: { start: 11, end: 15 },
+              },
               contractReference: {
                 kind: 'identifier',
                 name: 'Echo',
+                sourceSpan: { start: 16, end: 20 },
               },
+              sourceSpan: { start: 11, end: 20 },
             },
           ],
         }

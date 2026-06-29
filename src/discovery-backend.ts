@@ -51,40 +51,84 @@ export interface TsMorphDiscoveryWorkspace extends DiscoveryWorkspace {
   readonly project: Project
 }
 
-export interface DiscoveryImportBinding {
+export interface DiscoverySourceSpan {
+  readonly start: number
+  readonly end: number
+}
+
+export interface ScannedExportBinding {
+  readonly localName?: string
+  readonly exportNames: readonly string[]
+  readonly isDefaultExport: boolean
+  readonly sourceSpan?: DiscoverySourceSpan
+}
+
+export interface ScannedImportBinding {
   readonly kind: 'default' | 'named' | 'namespace'
   readonly specifier: string
   readonly localName: string
   readonly importedName?: string
+  readonly sourceSpan?: DiscoverySourceSpan
 }
 
+export type DiscoveryImportBinding = ScannedImportBinding
+
 export type ScannedContractReference =
-  | { readonly kind: 'identifier'; readonly name: string }
-  | { readonly kind: 'namespace'; readonly namespaceName: string; readonly exportName: string }
+  | { readonly kind: 'identifier'; readonly name: string; readonly sourceSpan?: DiscoverySourceSpan }
+  | {
+    readonly kind: 'namespace'
+    readonly namespaceName: string
+    readonly exportName: string
+    readonly sourceSpan?: DiscoverySourceSpan
+  }
+
+export type ScannedContractClauseKind = 'where' | 'pre' | 'post' | 'law' | 'example'
+
+export interface ScannedContractClause {
+  readonly kind: ScannedContractClauseKind
+  readonly name?: string
+  readonly argumentCount: number
+  readonly sourceSpan?: DiscoverySourceSpan
+}
+
+export interface ScannedContractClauseSummary {
+  readonly whereCount: number
+  readonly preNames: readonly string[]
+  readonly postNames: readonly string[]
+  readonly lawNames: readonly string[]
+  readonly exampleNames: readonly string[]
+}
+
+export interface ScannedDiscoveryDiagnostic {
+  readonly severity: 'info' | 'warning'
+  readonly message: string
+  readonly sourceSpan?: DiscoverySourceSpan
+}
 
 export interface ScannedContractCandidate {
   readonly kind: 'contract'
   readonly filePath: string
-  readonly localName?: string
-  readonly exportNames: readonly string[]
-  readonly isDefaultExport: boolean
+  readonly export: ScannedExportBinding
   readonly runtimeName?: string
+  readonly clauses: readonly ScannedContractClause[]
+  readonly clauseSummary: ScannedContractClauseSummary
+  readonly sourceSpan?: DiscoverySourceSpan
 }
 
 export interface ScannedImplementationCandidate {
   readonly kind: 'implementation'
   readonly filePath: string
-  readonly localName?: string
-  readonly exportNames: readonly string[]
-  readonly isDefaultExport: boolean
+  readonly export: ScannedExportBinding
   readonly contractReference: ScannedContractReference | null
+  readonly sourceSpan?: DiscoverySourceSpan
 }
 
 export interface ScannedSourceFile {
   readonly filePath: string
-  readonly imports: readonly DiscoveryImportBinding[]
+  readonly imports: readonly ScannedImportBinding[]
   readonly contracts: readonly ScannedContractCandidate[]
   readonly implementations: readonly ScannedImplementationCandidate[]
+  readonly diagnostics: readonly ScannedDiscoveryDiagnostic[]
 }
 
 export interface DiscoveryParsedFile<Ast = unknown> {
@@ -160,6 +204,62 @@ function localKey(filePath: string, localName: string): string {
 
 function createStableNodeId(kind: 'contract' | 'implementation', filePath: string, exportNames: readonly string[]): string {
   return `${kind}:${filePath}:${exportNames.join('|')}`
+}
+
+export function summarizeScannedContractClauses(
+  clauses: readonly ScannedContractClause[],
+): ScannedContractClauseSummary {
+  let whereCount = 0
+  const preNames: string[] = []
+  const postNames: string[] = []
+  const lawNames: string[] = []
+  const exampleNames: string[] = []
+
+  for (const clause of clauses) {
+    switch (clause.kind) {
+      case 'where':
+        whereCount += clause.argumentCount
+        break
+      case 'pre':
+        if (clause.name) {
+          preNames.push(clause.name)
+        }
+        break
+      case 'post':
+        if (clause.name) {
+          postNames.push(clause.name)
+        }
+        break
+      case 'law':
+        if (clause.name) {
+          lawNames.push(clause.name)
+        }
+        break
+      case 'example':
+        if (clause.name) {
+          exampleNames.push(clause.name)
+        }
+        break
+    }
+  }
+
+  return {
+    whereCount,
+    preNames: Object.freeze(preNames),
+    postNames: Object.freeze(postNames),
+    lawNames: Object.freeze(lawNames),
+    exampleNames: Object.freeze(exampleNames),
+  }
+}
+
+export function createEmptyScannedContractClauseSummary(): ScannedContractClauseSummary {
+  return {
+    whereCount: 0,
+    preNames: Object.freeze([]),
+    postNames: Object.freeze([]),
+    lawNames: Object.freeze([]),
+    exampleNames: Object.freeze([]),
+  }
 }
 
 function normalizeFilePath(filePath: string, rootDir?: string): string {
@@ -425,7 +525,7 @@ export function scanDiscoveryWorkspace<Ast>(
 
 function resolveScannedContractReference(
   workspace: DiscoveryWorkspace,
-  importsByFile: ReadonlyMap<string, readonly DiscoveryImportBinding[]>,
+  importsByFile: ReadonlyMap<string, readonly ScannedImportBinding[]>,
   reference: ScannedContractReference | null,
   filePath: string,
   contractIndexes: {
@@ -492,12 +592,12 @@ export function pairDiscoveryWorkspaceScan(
       runtimeName?: string
     } = {
       filePath: contract.filePath,
-      exportNames: contract.exportNames,
-      isDefaultExport: contract.isDefaultExport,
+      exportNames: contract.export.exportNames,
+      isDefaultExport: contract.export.isDefaultExport,
     }
 
-    if (contract.localName !== undefined) {
-      discoveredContract.localName = contract.localName
+    if (contract.export.localName !== undefined) {
+      discoveredContract.localName = contract.export.localName
     }
 
     if (contract.runtimeName !== undefined) {
@@ -507,7 +607,9 @@ export function pairDiscoveryWorkspaceScan(
     return toDiscoveredContract(discoveredContract)
   })
   const contractIndexes = buildContractIndexes(contracts)
-  const importsByFile = new Map(scannedFiles.map((file) => [file.filePath, file.imports]))
+  const importsByFile = new Map<string, readonly ScannedImportBinding[]>(
+    scannedFiles.map((file) => [file.filePath, file.imports]),
+  )
 
   const implementations = scannedFiles.flatMap((file) => file.implementations).map((implementation) => {
     const resolvedContract = resolveScannedContractReference(
@@ -526,13 +628,13 @@ export function pairDiscoveryWorkspaceScan(
       contract: DiscoveredContract | null
     } = {
       filePath: implementation.filePath,
-      exportNames: implementation.exportNames,
-      isDefaultExport: implementation.isDefaultExport,
+      exportNames: implementation.export.exportNames,
+      isDefaultExport: implementation.export.isDefaultExport,
       contract: resolvedContract,
     }
 
-    if (implementation.localName !== undefined) {
-      discoveredImplementation.localName = implementation.localName
+    if (implementation.export.localName !== undefined) {
+      discoveredImplementation.localName = implementation.export.localName
     }
 
     return toDiscoveredImplementation(discoveredImplementation)

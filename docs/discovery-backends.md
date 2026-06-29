@@ -44,6 +44,7 @@ The scanner should stay **syntax-first** and **explicit**. Spectacles already be
 - local bindings
 - call expressions
 - chained builder calls
+- source spans and lightweight diagnostics for agent-friendly navigation
 
 ### Layer 3: pairing/index layer
 
@@ -81,6 +82,12 @@ It currently introduces:
 - `createInMemoryDiscoveryResolver(...)`
 - `createTsMorphDiscoveryWorkspace(...)`
 - `DiscoveryAstScanner`
+- `ScannedSourceFile`
+- `ScannedExportBinding`
+- `ScannedContractClause`
+- `ScannedContractClauseSummary`
+- `ScannedDiscoveryDiagnostic`
+- `summarizeScannedContractClauses(...)`
 - `scanDiscoveryWorkspace(...)`
 - `pairDiscoveryWorkspaceScan(...)`
 - `discoverWorkspaceWithAstScanner(...)`
@@ -97,9 +104,10 @@ A practical first OXC-backed implementation should:
 2. build a `DiscoveryWorkspace`
 3. parse source text with OXC via `DiscoveryAstScanner`
 4. discover explicit contract/implementation bindings per file
-5. resolve imports against the resolver layer through `pairDiscoveryWorkspaceScan(...)`
-6. emit the same `DiscoveryResult` shape used today
-7. build the same compact `DiscoveryIndex`
+5. attach per-file source spans, clause summaries, and lightweight diagnostics
+6. resolve imports against the resolver layer through `pairDiscoveryWorkspaceScan(...)`
+7. emit the same `DiscoveryResult` shape used today
+8. build the same compact `DiscoveryIndex`
 
 That keeps planning and generation unchanged while removing most syntax-walking dependence on `ts-morph`.
 
@@ -107,12 +115,13 @@ That keeps planning and generation unchanged while removing most syntax-walking 
 
 Spectacles discovery is a natural fit for direct agent consumption because contracts and implementations encode the codebase's intended behavior graph.
 
-A future tool endpoint should prefer returning the compact discovery index instead of raw AST or full file text. That gives agents a way to:
+A future tool endpoint should prefer returning the compact discovery index plus selected scan metadata instead of raw AST or full file text. That gives agents a way to:
 
 - traverse a Spectacles codebase quickly
 - find the authoritative contract for an implementation
 - find the bound implementation for a contract
 - focus file reads on only the relevant source nodes
+- jump to exact source spans for contract clauses or pairings
 - spend fewer tokens on broad codebase navigation
 
 In other words, the same discovery engine that powers test generation can also power contract-aware agent navigation.
