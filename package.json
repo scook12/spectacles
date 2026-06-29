@@ -52,6 +52,10 @@
       "types": "./dist/generation.d.ts",
       "import": "./dist/generation.js"
     },
+    "./session": {
+      "types": "./dist/session.d.ts",
+      "import": "./dist/session.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -61,6 +65,7 @@
     "LICENSE"
   ],
   "scripts": {
+    "bench:scan": "npm run build && node ./scripts/benchmark-scan.mjs",
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
     "check": "npm run typecheck && npm test",
     "generate": "node ./dist/cli.js generate --help",

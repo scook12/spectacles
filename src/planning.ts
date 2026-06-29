@@ -59,6 +59,11 @@ export interface GenerateContractTestPlanOptions {
   readonly invalidArgs?: 'skip' | 'reject'
 }
 
+export interface ProjectAnalysis {
+  readonly project: Project
+  readonly discovery: DiscoveryResult
+}
+
 export interface GeneratedContractTestPlan {
   readonly suites: readonly PlannedSuite[]
   readonly contractsWithoutImplementations: readonly PlannedReference[]
@@ -445,11 +450,19 @@ export function generateContractTestPlan(
   options?: GenerateContractTestPlanOptions,
 ): GeneratedContractTestPlan
 export function generateContractTestPlan(
-  input: Project | DiscoveryResult,
+  analysis: ProjectAnalysis,
+  options?: GenerateContractTestPlanOptions,
+): GeneratedContractTestPlan
+export function generateContractTestPlan(
+  input: Project | DiscoveryResult | ProjectAnalysis,
   options: GenerateContractTestPlanOptions = {},
 ): GeneratedContractTestPlan {
   if (input instanceof Project) {
     return planFromDiscovery(discoverProject(input), input, options)
+  }
+
+  if ('project' in input && 'discovery' in input) {
+    return planFromDiscovery(input.discovery, input.project, options)
   }
 
   return planFromDiscovery(input, undefined, options)

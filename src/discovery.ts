@@ -47,9 +47,40 @@ interface ExportedVariableInfo {
 
 interface ExportedDefaultCallInfo {
   readonly exportAssignment: ExportAssignment
+  readonly callExpression: CallExpression
   readonly filePath: string
   readonly exportNames: readonly ['default']
   readonly isDefaultExport: true
+}
+
+interface ImportedBinding {
+  readonly filePath: string
+  readonly exportName: string
+}
+
+interface SourceFileScan {
+  readonly sourceFile: SourceFile
+  readonly filePath: string
+  readonly contractFactoryNames: ReadonlySet<string>
+  readonly implementFactoryNames: ReadonlySet<string>
+  readonly namespaceImportSourceFiles: ReadonlyMap<string, string>
+  readonly importedBindingsByLocal: ReadonlyMap<string, ImportedBinding>
+  readonly exportedVariables: readonly ExportedVariableInfo[]
+  readonly defaultExportCalls: readonly ExportedDefaultCallInfo[]
+}
+
+interface ImplementationCandidate {
+  readonly filePath: string
+  readonly localName?: string
+  readonly exportNames: readonly string[]
+  readonly isDefaultExport: boolean
+  readonly contractExpression: Node | null
+  readonly scan: SourceFileScan
+}
+
+interface ProjectScan {
+  readonly contracts: readonly DiscoveredContract[]
+  readonly implementationCandidates: readonly ImplementationCandidate[]
 }
 
 interface ContractIndexes {
@@ -65,39 +96,10 @@ function localKey(filePath: string, localName: string): string {
   return `${filePath}::${localName}`
 }
 
-function getImportedFunctionLocalNames(sourceFile: SourceFile, importedName: string): Set<string> {
-  const names = new Set<string>([importedName])
-
-  for (const importDeclaration of sourceFile.getImportDeclarations()) {
-    for (const namedImport of importDeclaration.getNamedImports()) {
-      if (namedImport.getNameNode().getText() !== importedName) {
-        continue
-      }
-
-      names.add(namedImport.getAliasNode()?.getText() ?? importedName)
-    }
-  }
-
-  return names
-}
-
-function getNamespaceImportNames(sourceFile: SourceFile): Set<string> {
-  const names = new Set<string>()
-
-  for (const importDeclaration of sourceFile.getImportDeclarations()) {
-    const namespaceImport = importDeclaration.getNamespaceImport()
-    if (namespaceImport) {
-      names.add(namespaceImport.getText())
-    }
-  }
-
-  return names
-}
-
 function getFactoryRootCall(
   callExpression: CallExpression,
-  directNames: Set<string>,
-  namespaceImportNames: Set<string>,
+  directNames: ReadonlySet<string>,
+  namespaceImportNames: ReadonlySet<string>,
   expectedPropertyName: string,
 ): CallExpression | null {
   let current: CallExpression | null = callExpression
@@ -134,8 +136,8 @@ function getFactoryRootCall(
 
 function isMatchingFactoryCall(
   callExpression: CallExpression,
-  directNames: Set<string>,
-  namespaceImportNames: Set<string>,
+  directNames: ReadonlySet<string>,
+  namespaceImportNames: ReadonlySet<string>,
   expectedPropertyName: string,
 ): boolean {
   return getFactoryRootCall(callExpression, directNames, namespaceImportNames, expectedPropertyName) !== null
@@ -185,14 +187,51 @@ function collectExportedVariableInfos(sourceFile: SourceFile): ExportedVariableI
   }))
 }
 
-function collectDefaultExportedCallInfos(
-  sourceFile: SourceFile,
-  directNames: Set<string>,
-  namespaceImportNames: Set<string>,
-  expectedPropertyName: string,
-): ExportedDefaultCallInfo[] {
-  const results: ExportedDefaultCallInfo[] = []
+function scanSourceFile(sourceFile: SourceFile): SourceFileScan {
+  const contractFactoryNames = new Set<string>(['contract'])
+  const implementFactoryNames = new Set<string>(['implement'])
+  const namespaceImportSourceFiles = new Map<string, string>()
+  const importedBindingsByLocal = new Map<string, ImportedBinding>()
 
+  for (const importDeclaration of sourceFile.getImportDeclarations()) {
+    const importedSourceFile = importDeclaration.getModuleSpecifierSourceFile()
+    const importedFilePath = importedSourceFile?.getFilePath()
+
+    const defaultImport = importDeclaration.getDefaultImport()
+    if (defaultImport && importedFilePath) {
+      importedBindingsByLocal.set(defaultImport.getText(), {
+        filePath: importedFilePath,
+        exportName: 'default',
+      })
+    }
+
+    const namespaceImport = importDeclaration.getNamespaceImport()
+    if (namespaceImport && importedFilePath) {
+      namespaceImportSourceFiles.set(namespaceImport.getText(), importedFilePath)
+    }
+
+    for (const namedImport of importDeclaration.getNamedImports()) {
+      const importedName = namedImport.getNameNode().getText()
+      const localName = namedImport.getAliasNode()?.getText() ?? importedName
+
+      if (importedFilePath) {
+        importedBindingsByLocal.set(localName, {
+          filePath: importedFilePath,
+          exportName: importedName,
+        })
+      }
+
+      if (importedName === 'contract') {
+        contractFactoryNames.add(localName)
+      }
+
+      if (importedName === 'implement') {
+        implementFactoryNames.add(localName)
+      }
+    }
+  }
+
+  const defaultExportCalls: ExportedDefaultCallInfo[] = []
   for (const exportAssignment of sourceFile.getExportAssignments()) {
     if (exportAssignment.isExportEquals()) {
       continue
@@ -203,115 +242,25 @@ function collectDefaultExportedCallInfos(
       continue
     }
 
-    if (!isMatchingFactoryCall(expression, directNames, namespaceImportNames, expectedPropertyName)) {
-      continue
-    }
-
-    results.push({
+    defaultExportCalls.push({
       exportAssignment,
+      callExpression: expression,
       filePath: sourceFile.getFilePath(),
       exportNames: ['default'],
       isDefaultExport: true,
     })
   }
 
-  return results
-}
-
-function buildContractIndexes(contracts: readonly DiscoveredContract[]): ContractIndexes {
-  const byFileAndExport = new Map<string, DiscoveredContract>()
-  const byFileAndLocal = new Map<string, DiscoveredContract>()
-
-  for (const contract of contracts) {
-    for (const exportName of contract.exportNames) {
-      byFileAndExport.set(exportKey(contract.filePath, exportName), contract)
-    }
-
-    if (contract.localName) {
-      byFileAndLocal.set(localKey(contract.filePath, contract.localName), contract)
-    }
+  return {
+    sourceFile,
+    filePath: sourceFile.getFilePath(),
+    contractFactoryNames,
+    implementFactoryNames,
+    namespaceImportSourceFiles,
+    importedBindingsByLocal,
+    exportedVariables: collectExportedVariableInfos(sourceFile),
+    defaultExportCalls: Object.freeze(defaultExportCalls),
   }
-
-  return { byFileAndExport, byFileAndLocal }
-}
-
-function resolveImportedContract(
-  sourceFile: SourceFile,
-  localName: string,
-  indexes: ContractIndexes,
-): DiscoveredContract | null {
-  for (const importDeclaration of sourceFile.getImportDeclarations()) {
-    const importedSourceFile = importDeclaration.getModuleSpecifierSourceFile()
-    if (!importedSourceFile) {
-      continue
-    }
-
-    const defaultImport = importDeclaration.getDefaultImport()
-    if (defaultImport && defaultImport.getText() === localName) {
-      return indexes.byFileAndExport.get(exportKey(importedSourceFile.getFilePath(), 'default')) ?? null
-    }
-
-    for (const namedImport of importDeclaration.getNamedImports()) {
-      const importedLocalName = namedImport.getAliasNode()?.getText() ?? namedImport.getNameNode().getText()
-      if (importedLocalName !== localName) {
-        continue
-      }
-
-      return indexes.byFileAndExport.get(
-        exportKey(importedSourceFile.getFilePath(), namedImport.getNameNode().getText()),
-      ) ?? null
-    }
-  }
-
-  return null
-}
-
-function resolveNamespaceImportedContract(
-  sourceFile: SourceFile,
-  namespaceName: string,
-  exportName: string,
-  indexes: ContractIndexes,
-): DiscoveredContract | null {
-  for (const importDeclaration of sourceFile.getImportDeclarations()) {
-    const namespaceImport = importDeclaration.getNamespaceImport()
-    if (!namespaceImport || namespaceImport.getText() !== namespaceName) {
-      continue
-    }
-
-    const importedSourceFile = importDeclaration.getModuleSpecifierSourceFile()
-    if (!importedSourceFile) {
-      continue
-    }
-
-    return indexes.byFileAndExport.get(exportKey(importedSourceFile.getFilePath(), exportName)) ?? null
-  }
-
-  return null
-}
-
-function resolveContractReference(
-  sourceFile: SourceFile,
-  expression: Node,
-  indexes: ContractIndexes,
-): DiscoveredContract | null {
-  if (Node.isIdentifier(expression)) {
-    return (
-      resolveImportedContract(sourceFile, expression.getText(), indexes)
-      ?? indexes.byFileAndLocal.get(localKey(sourceFile.getFilePath(), expression.getText()))
-      ?? null
-    )
-  }
-
-  if (Node.isPropertyAccessExpression(expression)) {
-    const left = expression.getExpression()
-    if (!Node.isIdentifier(left)) {
-      return null
-    }
-
-    return resolveNamespaceImportedContract(sourceFile, left.getText(), expression.getName(), indexes)
-  }
-
-  return null
 }
 
 function toDiscoveredContract(args: {
@@ -372,7 +321,7 @@ function toDiscoveredImplementation(args: {
   filePath: string
   exportNames: readonly string[]
   isDefaultExport: boolean
-  localName?: string
+  localName?: string | undefined
   contract: DiscoveredContract | null
 }): DiscoveredImplementation {
   const result: {
@@ -397,131 +346,188 @@ function toDiscoveredImplementation(args: {
   return result
 }
 
-function getCallExpressionFromExportAssignment(exportAssignment: ExportAssignment): CallExpression {
-  const expression = exportAssignment.getExpression()
-  if (!expression || !Node.isCallExpression(expression)) {
-    throw new TypeError('Expected export assignment to contain a call expression')
+function buildContractIndexes(contracts: readonly DiscoveredContract[]): ContractIndexes {
+  const byFileAndExport = new Map<string, DiscoveredContract>()
+  const byFileAndLocal = new Map<string, DiscoveredContract>()
+
+  for (const contract of contracts) {
+    for (const exportName of contract.exportNames) {
+      byFileAndExport.set(exportKey(contract.filePath, exportName), contract)
+    }
+
+    if (contract.localName !== undefined) {
+      byFileAndLocal.set(localKey(contract.filePath, contract.localName), contract)
+    }
   }
 
-  return expression
+  return { byFileAndExport, byFileAndLocal }
 }
 
-export function discoverContracts(project: Project): DiscoveredContract[] {
-  const results: DiscoveredContract[] = []
+function resolveContractReference(
+  scan: SourceFileScan,
+  expression: Node,
+  indexes: ContractIndexes,
+): DiscoveredContract | null {
+  if (Node.isIdentifier(expression)) {
+    const localName = expression.getText()
+    const importedBinding = scan.importedBindingsByLocal.get(localName)
+    if (importedBinding) {
+      return indexes.byFileAndExport.get(exportKey(importedBinding.filePath, importedBinding.exportName)) ?? null
+    }
+
+    return indexes.byFileAndLocal.get(localKey(scan.filePath, localName)) ?? null
+  }
+
+  if (Node.isPropertyAccessExpression(expression)) {
+    const left = expression.getExpression()
+    if (!Node.isIdentifier(left)) {
+      return null
+    }
+
+    const sourceFilePath = scan.namespaceImportSourceFiles.get(left.getText())
+    if (!sourceFilePath) {
+      return null
+    }
+
+    return indexes.byFileAndExport.get(exportKey(sourceFilePath, expression.getName())) ?? null
+  }
+
+  return null
+}
+
+function scanProject(project: Project): ProjectScan {
+  const contracts: DiscoveredContract[] = []
+  const implementationCandidates: ImplementationCandidate[] = []
 
   for (const sourceFile of project.getSourceFiles()) {
-    const directNames = getImportedFunctionLocalNames(sourceFile, 'contract')
-    const namespaceImportNames = getNamespaceImportNames(sourceFile)
+    const scan = scanSourceFile(sourceFile)
+    const namespaceImportNames = new Set(scan.namespaceImportSourceFiles.keys())
 
-    for (const exportedVariable of collectExportedVariableInfos(sourceFile)) {
+    for (const exportedVariable of scan.exportedVariables) {
       const initializer = exportedVariable.declaration.getInitializer()
       if (!initializer || !Node.isCallExpression(initializer)) {
         continue
       }
 
-      if (!isMatchingFactoryCall(initializer, directNames, namespaceImportNames, 'contract')) {
+      const contractRoot = getFactoryRootCall(
+        initializer,
+        scan.contractFactoryNames,
+        namespaceImportNames,
+        'contract',
+      )
+      if (contractRoot) {
+        contracts.push(toDiscoveredContract({
+          filePath: exportedVariable.filePath,
+          localName: exportedVariable.localName,
+          exportNames: exportedVariable.exportNames,
+          isDefaultExport: exportedVariable.isDefaultExport,
+          runtimeName: getRuntimeName(contractRoot),
+        }))
         continue
       }
 
-      results.push(toDiscoveredContract({
+      const implementRoot = getFactoryRootCall(
+        initializer,
+        scan.implementFactoryNames,
+        namespaceImportNames,
+        'implement',
+      )
+      if (!implementRoot) {
+        continue
+      }
+
+      implementationCandidates.push({
         filePath: exportedVariable.filePath,
         localName: exportedVariable.localName,
         exportNames: exportedVariable.exportNames,
         isDefaultExport: exportedVariable.isDefaultExport,
-        runtimeName: getRuntimeName(getFactoryRootCall(initializer, directNames, namespaceImportNames, 'contract') ?? initializer),
-      }))
+        contractExpression: initializer.getArguments()[0] ?? null,
+        scan,
+      })
     }
 
-    for (const exportedDefaultCall of collectDefaultExportedCallInfos(
-      sourceFile,
-      directNames,
-      namespaceImportNames,
-      'contract',
-    )) {
-      results.push(toDiscoveredContract({
+    for (const exportedDefaultCall of scan.defaultExportCalls) {
+      const contractRoot = getFactoryRootCall(
+        exportedDefaultCall.callExpression,
+        scan.contractFactoryNames,
+        namespaceImportNames,
+        'contract',
+      )
+      if (contractRoot) {
+        contracts.push(toDiscoveredContract({
+          filePath: exportedDefaultCall.filePath,
+          exportNames: exportedDefaultCall.exportNames,
+          isDefaultExport: exportedDefaultCall.isDefaultExport,
+          runtimeName: getRuntimeName(contractRoot),
+        }))
+        continue
+      }
+
+      const implementRoot = getFactoryRootCall(
+        exportedDefaultCall.callExpression,
+        scan.implementFactoryNames,
+        namespaceImportNames,
+        'implement',
+      )
+      if (!implementRoot) {
+        continue
+      }
+
+      implementationCandidates.push({
         filePath: exportedDefaultCall.filePath,
         exportNames: exportedDefaultCall.exportNames,
         isDefaultExport: exportedDefaultCall.isDefaultExport,
-        runtimeName: getRuntimeName(
-          getFactoryRootCall(
-            getCallExpressionFromExportAssignment(exportedDefaultCall.exportAssignment),
-            directNames,
-            namespaceImportNames,
-            'contract',
-          ) ?? getCallExpressionFromExportAssignment(exportedDefaultCall.exportAssignment),
-        ),
-      }))
+        contractExpression: exportedDefaultCall.callExpression.getArguments()[0] ?? null,
+        scan,
+      })
     }
   }
 
-  return results
+  return {
+    contracts: Object.freeze(contracts),
+    implementationCandidates: Object.freeze(implementationCandidates),
+  }
+}
+
+function resolveImplementationCandidates(
+  candidates: readonly ImplementationCandidate[],
+  contracts: readonly DiscoveredContract[],
+): DiscoveredImplementation[] {
+  const indexes = buildContractIndexes(contracts)
+
+  return candidates.map((candidate) => {
+    const resolvedContract = candidate.contractExpression
+      ? resolveContractReference(candidate.scan, candidate.contractExpression, indexes)
+      : null
+
+    return toDiscoveredImplementation({
+      filePath: candidate.filePath,
+      localName: candidate.localName,
+      exportNames: candidate.exportNames,
+      isDefaultExport: candidate.isDefaultExport,
+      contract: resolvedContract,
+    })
+  })
+}
+
+export function discoverContracts(project: Project): DiscoveredContract[] {
+  return [...scanProject(project).contracts]
 }
 
 export function discoverImplementations(
   project: Project,
-  contracts: readonly DiscoveredContract[] = discoverContracts(project),
+  contracts?: readonly DiscoveredContract[],
 ): DiscoveredImplementation[] {
-  const indexes = buildContractIndexes(contracts)
-  const results: DiscoveredImplementation[] = []
-
-  for (const sourceFile of project.getSourceFiles()) {
-    const directNames = getImportedFunctionLocalNames(sourceFile, 'implement')
-    const namespaceImportNames = getNamespaceImportNames(sourceFile)
-
-    for (const exportedVariable of collectExportedVariableInfos(sourceFile)) {
-      const initializer = exportedVariable.declaration.getInitializer()
-      if (!initializer || !Node.isCallExpression(initializer)) {
-        continue
-      }
-
-      if (!isMatchingFactoryCall(initializer, directNames, namespaceImportNames, 'implement')) {
-        continue
-      }
-
-      const contractArgument = initializer.getArguments()[0]
-      const resolvedContract = contractArgument
-        ? resolveContractReference(sourceFile, contractArgument, indexes)
-        : null
-
-      results.push(toDiscoveredImplementation({
-        filePath: exportedVariable.filePath,
-        localName: exportedVariable.localName,
-        exportNames: exportedVariable.exportNames,
-        isDefaultExport: exportedVariable.isDefaultExport,
-        contract: resolvedContract,
-      }))
-    }
-
-    for (const exportedDefaultCall of collectDefaultExportedCallInfos(
-      sourceFile,
-      directNames,
-      namespaceImportNames,
-      'implement',
-    )) {
-      const callExpression = getCallExpressionFromExportAssignment(exportedDefaultCall.exportAssignment)
-      const contractArgument = callExpression.getArguments()[0]
-      const resolvedContract = contractArgument
-        ? resolveContractReference(sourceFile, contractArgument, indexes)
-        : null
-
-      results.push(toDiscoveredImplementation({
-        filePath: exportedDefaultCall.filePath,
-        exportNames: exportedDefaultCall.exportNames,
-        isDefaultExport: exportedDefaultCall.isDefaultExport,
-        contract: resolvedContract,
-      }))
-    }
-  }
-
-  return results
+  const scan = scanProject(project)
+  return resolveImplementationCandidates(scan.implementationCandidates, contracts ?? scan.contracts)
 }
 
 export function discoverProject(project: Project): DiscoveryResult {
-  const contracts = discoverContracts(project)
-  const implementations = discoverImplementations(project, contracts)
+  const scan = scanProject(project)
+  const implementations = resolveImplementationCandidates(scan.implementationCandidates, scan.contracts)
 
   return {
-    contracts,
+    contracts: scan.contracts,
     implementations,
   }
 }

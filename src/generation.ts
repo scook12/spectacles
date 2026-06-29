@@ -17,6 +17,7 @@ export interface GenerateVitestContractFilesOptions
   extends Omit<RenderVitestContractSuiteOptions, 'outputFilePath'> {
   readonly outputDir: string
   readonly fileName?: (suite: PlannedSuite, index: number) => string
+  readonly plan?: GeneratedContractTestPlan
   readonly writeToProject?: boolean
   readonly save?: boolean
 }
@@ -151,7 +152,7 @@ export function generateVitestContractFiles(
     throw new TypeError('generateVitestContractFiles(project, options): options.fileName must be a function')
   }
 
-  const plan = generateContractTestPlan(
+  const plan = options.plan ?? generateContractTestPlan(
     project,
     options.runOptions?.invalidArgs !== undefined
       ? { invalidArgs: options.runOptions.invalidArgs }
