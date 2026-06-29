@@ -1,6 +1,7 @@
+import { spawnSync } from 'node:child_process'
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
@@ -109,6 +110,74 @@ function createGenerationTsConfigFixture(): { rootDir: string; tsConfigFilePath:
       import { RangeLength } from '@/contracts'
 
       export const rangeLength = implement(RangeLength, ({ start, end }) => end - start)
+    `,
+  )
+
+  return {
+    rootDir,
+    tsConfigFilePath: join(rootDir, 'tsconfig.json'),
+  }
+}
+
+function createFailingGeneratedSuiteFixture(): { rootDir: string; tsConfigFilePath: string } {
+  const tempRoot = resolve(process.cwd(), '.tmp')
+  mkdirSync(tempRoot, { recursive: true })
+
+  const rootDir = mkdtempSync(join(tempRoot, 'spectacles-generated-suite-failure-'))
+  const srcDir = join(rootDir, 'src')
+  mkdirSync(srcDir, { recursive: true })
+
+  writeFileSync(
+    join(rootDir, 'tsconfig.json'),
+    JSON.stringify({
+      compilerOptions: {
+        module: 'nodenext',
+        moduleResolution: 'nodenext',
+        target: 'esnext',
+      },
+      include: ['src/**/*.ts', 'generated/**/*.ts'],
+    }, null, 2),
+  )
+
+  writeFileSync(
+    join(rootDir, 'vitest.config.ts'),
+    `
+      import { defineConfig } from 'vitest/config'
+
+      export default defineConfig({
+        test: {
+          include: ['generated/**/*.test.ts'],
+        },
+      })
+    `,
+  )
+
+  writeFileSync(
+    join(srcDir, 'contracts.ts'),
+    `
+      import { contract, field } from 'spectacles'
+      import { z } from 'zod'
+
+      export const RangeLength = contract('RangeLength', {
+        input: z.object({ start: z.number().int(), end: z.number().int() }),
+        output: z.number().int(),
+      })
+        .where(field('input.start').lte(field('input.end')))
+        .post('difference', ({ input, output }) => output === input.end - input.start)
+        .example('simple range', {
+          input: { start: 2, end: 5 },
+          output: 3,
+        })
+    `,
+  )
+
+  writeFileSync(
+    join(srcDir, 'implementations.ts'),
+    `
+      import { implement } from 'spectacles'
+      import { RangeLength } from './contracts'
+
+      export const rangeLength = implement(RangeLength, () => 0)
     `,
   )
 
@@ -239,4 +308,36 @@ describe('generateVitestContractFiles()', () => {
       'options must be an object',
     )
   })
+
+  it('produces generated suites that fail for incorrect implementations', () => {
+    const fixture = createFailingGeneratedSuiteFixture()
+
+    try {
+      const result = generateVitestContractFilesFromTsConfig(fixture.tsConfigFilePath, {
+        outputDir: join(fixture.rootDir, 'generated'),
+      })
+
+      expect(result.files).toHaveLength(1)
+
+      const vitestCliPath = resolve(process.cwd(), 'node_modules/vitest/vitest.mjs')
+      const completed = spawnSync(
+        process.execPath,
+        [vitestCliPath, 'run', '--config', join(fixture.rootDir, 'vitest.config.ts')],
+        {
+          cwd: fixture.rootDir,
+          encoding: 'utf8',
+          timeout: 20_000,
+        },
+      )
+
+      expect(completed.error).toBeUndefined()
+      expect(completed.status).not.toBe(0)
+
+      const output = `${completed.stdout}\n${completed.stderr}`
+      expect(output).toContain('example: simple range')
+      expect(output).toContain('postcondition failed: difference')
+    } finally {
+      rmSync(fixture.rootDir, { recursive: true, force: true })
+    }
+  }, 25_000)
 })
