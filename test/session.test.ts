@@ -3,8 +3,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
-import { Project } from 'ts-morph'
 
+import { createDiscoveryWorkspace } from '../discovery-backend.ts'
 import { createSpectaclesSession } from '../session.ts'
 
 function createFixtureProject(): { rootDir: string; tsConfigFilePath: string } {
@@ -53,15 +53,15 @@ function createFixtureProject(): { rootDir: string; tsConfigFilePath: string } {
 }
 
 describe('createSpectaclesSession()', () => {
-  it('memoizes project, discovery, and plans for tsconfig-backed sessions', () => {
+  it('memoizes analysis, discovery, plans, and generation for tsconfig-backed sessions', () => {
     const fixture = createFixtureProject()
 
     try {
       const session = createSpectaclesSession({ tsConfigFilePath: fixture.tsConfigFilePath })
 
-      const projectA = session.project()
-      const projectB = session.project()
-      expect(projectA).toBe(projectB)
+      const analysisA = session.analysis()
+      const analysisB = session.analysis()
+      expect(analysisA).toBe(analysisB)
 
       const discoveryA = session.discovery()
       const discoveryB = session.discovery()
@@ -78,8 +78,7 @@ describe('createSpectaclesSession()', () => {
 
       const generation = session.generate({
         outputDir: join(fixture.rootDir, 'test/generated'),
-        writeToProject: false,
-        save: false,
+        writeFiles: false,
       })
       expect(generation.plan).toBe(planA)
       expect(generation.files).toHaveLength(1)
@@ -88,22 +87,29 @@ describe('createSpectaclesSession()', () => {
     }
   })
 
-  it('supports wrapping an existing ts-morph project', () => {
-    const project = new Project({ useInMemoryFileSystem: true, skipFileDependencyResolution: true })
-    project.createSourceFile('/src/contracts.ts', `
-      import { contract } from 'spectacles'
-      import { z } from 'zod'
-      export const Echo = contract('Echo', { input: z.string(), output: z.string() })
-    `)
-    project.createSourceFile('/src/implementations.ts', `
-      import { implement } from 'spectacles'
-      import { Echo } from './contracts'
-      export const echo = implement(Echo, (input) => input)
-    `)
+  it('supports wrapping an existing discovery workspace', () => {
+    const workspace = createDiscoveryWorkspace([
+      {
+        filePath: '/src/contracts.ts',
+        text: `
+          import { contract } from 'spectacles'
+          import { z } from 'zod'
+          export const Echo = contract('Echo', { input: z.string(), output: z.string() })
+        `,
+      },
+      {
+        filePath: '/src/implementations.ts',
+        text: `
+          import { implement } from 'spectacles'
+          import { Echo } from './contracts'
+          export const echo = implement(Echo, (input) => input)
+        `,
+      },
+    ])
 
-    const session = createSpectaclesSession({ project })
-    expect(session.project()).toBe(project)
+    const session = createSpectaclesSession({ workspace })
+    expect(session.analysis().discovery.contracts).toHaveLength(1)
     expect(session.discovery().contracts).toHaveLength(1)
-    expect(session.generate({ outputDir: '/generated', writeToProject: false, save: false }).files).toHaveLength(1)
+    expect(session.generate({ outputDir: '/generated', writeFiles: false }).files).toHaveLength(1)
   })
 })

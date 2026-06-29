@@ -59,7 +59,7 @@ function createFixtureProject(): { rootDir: string; tsConfigFilePath: string } {
 }
 
 describe('generateVitestContractFilesFromTsConfig()', () => {
-  it('creates a project from tsconfig and writes generated files by default', () => {
+  it('uses the default tsconfig analysis path and writes generated files by default', () => {
     const fixture = createFixtureProject()
 
     try {
@@ -71,7 +71,7 @@ describe('generateVitestContractFilesFromTsConfig()', () => {
       expect(result.files).toHaveLength(1)
       const generatedPath = join(fixture.rootDir, 'test/generated/echo--echo.contract.test.ts')
       expect(readFileSync(generatedPath, 'utf8')).toBe(result.files[0]?.content)
-      expect(result.project.getSourceFile(generatedPath)).toBeDefined()
+      expect(result.analysis.workspace.tsConfigFilePath).toBe(fixture.tsConfigFilePath)
     } finally {
       rmSync(fixture.rootDir, { recursive: true, force: true })
     }

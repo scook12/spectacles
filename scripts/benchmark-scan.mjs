@@ -3,9 +3,8 @@
 import { performance } from 'node:perf_hooks'
 import { resolve } from 'node:path'
 
-import { Project } from 'ts-morph'
-
-import { discoverProject } from '../dist/discovery.js'
+import { createTypeScriptDiscoveryWorkspace } from '../dist/discovery-backend.js'
+import { analyzeOxcDiscoveryTsConfig, analyzeOxcDiscoveryWorkspace } from '../dist/discovery-scanner-oxc.js'
 import { generateVitestContractFiles, generateVitestContractFilesFromTsConfig } from '../dist/generation.js'
 import { generateContractTestPlan } from '../dist/planning.js'
 
@@ -30,48 +29,44 @@ function summarize(label, samples) {
   }
 }
 
-const coldProjectAndDiscover = []
-const warmDiscover = []
-const warmPlanFromProject = []
-const warmPlanFromDiscovery = []
+const coldWorkspaceBootstrap = []
+const coldAnalyzeTsConfig = []
+const warmAnalyzeWorkspace = []
+const warmPlanFromAnalysis = []
 const warmGenerate = []
-const coldFromTsConfig = []
+const coldFromTsConfigWrapper = []
 
 for (let index = 0; index < runs; index += 1) {
-  const cold = measure('cold project+discover', () => {
-    const project = new Project({ tsConfigFilePath })
-    return discoverProject(project)
-  })
-  coldProjectAndDiscover.push(cold.ms)
+  coldWorkspaceBootstrap.push(measure('cold workspace bootstrap', () => createTypeScriptDiscoveryWorkspace(tsConfigFilePath)).ms)
+  coldAnalyzeTsConfig.push(measure('cold analyze(tsconfig)', () => analyzeOxcDiscoveryTsConfig(tsConfigFilePath)).ms)
 
-  const project = new Project({ tsConfigFilePath })
-  const discovery = discoverProject(project)
+  const workspace = createTypeScriptDiscoveryWorkspace(tsConfigFilePath)
+  const analysis = analyzeOxcDiscoveryWorkspace(workspace)
+  const plan = generateContractTestPlan(analysis)
 
-  warmDiscover.push(measure('warm discover', () => discoverProject(project)).ms)
-  warmPlanFromProject.push(measure('warm plan(project)', () => generateContractTestPlan(project)).ms)
-  warmPlanFromDiscovery.push(measure('warm plan(discovery)', () => generateContractTestPlan(discovery)).ms)
+  warmAnalyzeWorkspace.push(measure('warm analyze(workspace)', () => analyzeOxcDiscoveryWorkspace(workspace)).ms)
+  warmPlanFromAnalysis.push(measure('warm plan(analysis)', () => generateContractTestPlan(analysis)).ms)
   warmGenerate.push(measure('warm generate', () => {
-    return generateVitestContractFiles(project, {
+    return generateVitestContractFiles(analysis, {
       outputDir,
-      writeToProject: false,
-      save: false,
+      plan,
+      writeFiles: false,
     })
   }).ms)
 
-  coldFromTsConfig.push(measure('cold from tsconfig wrapper', () => {
+  coldFromTsConfigWrapper.push(measure('cold from tsconfig wrapper', () => {
     return generateVitestContractFilesFromTsConfig(tsConfigFilePath, {
       outputDir,
-      writeToProject: false,
-      save: false,
+      writeFiles: false,
     })
   }).ms)
 }
 
 console.table([
-  summarize('cold project + discover', coldProjectAndDiscover),
-  summarize('warm discover', warmDiscover),
-  summarize('warm plan(project)', warmPlanFromProject),
-  summarize('warm plan(discovery)', warmPlanFromDiscovery),
+  summarize('cold TS workspace bootstrap', coldWorkspaceBootstrap),
+  summarize('cold OXC analyze(tsconfig)', coldAnalyzeTsConfig),
+  summarize('warm OXC analyze(workspace)', warmAnalyzeWorkspace),
+  summarize('warm plan(analysis)', warmPlanFromAnalysis),
   summarize('warm generate', warmGenerate),
-  summarize('cold from tsconfig wrapper', coldFromTsConfig),
+  summarize('cold from tsconfig wrapper', coldFromTsConfigWrapper),
 ])

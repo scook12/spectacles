@@ -173,8 +173,7 @@ export async function runCli(
   const result = generateVitestContractFilesFromTsConfig(command.project, {
     outputDir: command.outputDir,
     includePlanComments: command.includePlanComments,
-    writeToProject: !command.dryRun,
-    save: !command.dryRun,
+    writeFiles: !command.dryRun,
     runOptions: {
       ...(command.numRuns !== undefined ? { numRuns: command.numRuns } : {}),
       ...(command.timeoutMs !== undefined ? { timeoutMs: command.timeoutMs } : {}),

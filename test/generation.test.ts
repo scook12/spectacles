@@ -3,51 +3,15 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
-import { Project } from 'ts-morph'
 
 import { createDiscoveryWorkspace } from '../discovery-backend.ts'
 import { analyzeOxcDiscoveryTsConfig, analyzeOxcDiscoveryWorkspace } from '../discovery-scanner-oxc.ts'
 import {
   generateVitestContractFiles,
-  generateVitestContractFilesFromAnalysis,
   generateVitestContractFilesFromPlan,
-  generateVitestContractFilesFromTsConfigWithOxc,
+  generateVitestContractFilesFromTsConfig,
   writeGeneratedVitestContractFiles,
 } from '../generation.ts'
-
-function createGenerationProject(): Project {
-  const project = new Project({
-    useInMemoryFileSystem: true,
-    skipFileDependencyResolution: true,
-  })
-
-  project.createSourceFile(
-    '/src/contracts.ts',
-    `
-      import { contract, field } from 'spectacles'
-      import { z } from 'zod'
-
-      export const RangeLength = contract('RangeLength', {
-        input: z.object({ start: z.number(), end: z.number() }),
-        output: z.number(),
-      })
-        .where(field('input.start').lte(field('input.end')))
-        .post('difference', ({ input, output }) => output === input.end - input.start)
-    `,
-  )
-
-  project.createSourceFile(
-    '/src/implementations.ts',
-    `
-      import { implement } from 'spectacles'
-      import { RangeLength } from './contracts'
-
-      export const rangeLength = implement(RangeLength, ({ start, end }) => end - start)
-    `,
-  )
-
-  return project
-}
 
 function createGenerationWorkspace() {
   return createDiscoveryWorkspace([
@@ -72,6 +36,31 @@ function createGenerationWorkspace() {
         import { RangeLength } from './contracts'
 
         export const rangeLength = implement(RangeLength, ({ start, end }) => end - start)
+      `,
+    },
+  ])
+}
+
+function createCollisionWorkspace() {
+  return createDiscoveryWorkspace([
+    {
+      filePath: '/src/contracts.ts',
+      text: `
+        import { contract } from 'spectacles'
+        import { z } from 'zod'
+
+        export const Alpha = contract('Alpha', { input: z.string(), output: z.string() })
+        export const Beta = contract('Beta', { input: z.string(), output: z.string() })
+      `,
+    },
+    {
+      filePath: '/src/implementations.ts',
+      text: `
+        import { implement } from 'spectacles'
+        import { Alpha, Beta } from './contracts'
+
+        export const alpha = implement(Alpha, (input) => input)
+        export const beta = implement(Beta, (input) => input)
       `,
     },
   ])
@@ -129,77 +118,13 @@ function createGenerationTsConfigFixture(): { rootDir: string; tsConfigFilePath:
   }
 }
 
-function createCollisionProject(): Project {
-  const project = new Project({
-    useInMemoryFileSystem: true,
-    skipFileDependencyResolution: true,
-  })
-
-  project.createSourceFile(
-    '/src/contracts.ts',
-    `
-      import { contract } from 'spectacles'
-      import { z } from 'zod'
-
-      export const Alpha = contract('Alpha', { input: z.string(), output: z.string() })
-      export const Beta = contract('Beta', { input: z.string(), output: z.string() })
-    `,
-  )
-
-  project.createSourceFile(
-    '/src/implementations.ts',
-    `
-      import { implement } from 'spectacles'
-      import { Alpha, Beta } from './contracts'
-
-      export const alpha = implement(Alpha, (input) => input)
-      export const beta = implement(Beta, (input) => input)
-    `,
-  )
-
-  return project
-}
-
 describe('generateVitestContractFiles()', () => {
-  it('generates and adds vitest contract files to the project', () => {
-    const project = createGenerationProject()
-    const result = generateVitestContractFiles(project, {
+  it('generates contract files from discovery analysis', () => {
+    const analysis = analyzeOxcDiscoveryWorkspace(createGenerationWorkspace())
+    const result = generateVitestContractFiles(analysis, {
       outputDir: '/test/generated',
       runOptions: { numRuns: 50, invalidArgs: 'reject' },
-    })
-
-    expect(result.plan.suites).toHaveLength(1)
-    expect(result.files).toHaveLength(1)
-    expect(result.files[0]?.outputFilePath).toBe('/test/generated/range-length--range-length.contract.test.ts')
-    expect(result.files[0]?.content).toContain("import { RangeLength } from '../../src/contracts.js'")
-    expect(result.files[0]?.content).toContain("import { rangeLength } from '../../src/implementations.js'")
-    expect(result.files[0]?.content).toContain('    numRuns: 50,')
-    expect(result.files[0]?.content).toContain('    invalidArgs: "reject",')
-
-    const generatedSourceFile = project.getSourceFile('/test/generated/range-length--range-length.contract.test.ts')
-    expect(generatedSourceFile?.getFullText()).toBe(result.files[0]?.content)
-  })
-
-  it('supports custom naming and skipping project writes', () => {
-    const project = createGenerationProject()
-    const result = generateVitestContractFiles(project, {
-      outputDir: '/test/generated',
-      fileName: () => 'custom-suite.spec.ts',
-      writeToProject: false,
-      includePlanComments: false,
-    })
-
-    expect(result.files).toHaveLength(1)
-    expect(result.files[0]?.outputFilePath).toBe('/test/generated/custom-suite.spec.ts')
-    expect(result.files[0]?.content).not.toContain('Generated contract suite')
-    expect(project.getSourceFile('/test/generated/custom-suite.spec.ts')).toBeUndefined()
-  })
-
-  it('generates files from discovery analysis without requiring a ts-morph project', () => {
-    const analysis = analyzeOxcDiscoveryWorkspace(createGenerationWorkspace())
-    const result = generateVitestContractFilesFromAnalysis(analysis, {
-      outputDir: '/test/generated',
-      runOptions: { numRuns: 25, invalidArgs: 'reject' },
+      writeFiles: false,
     })
 
     expect(result.plan.suites).toHaveLength(1)
@@ -208,18 +133,32 @@ describe('generateVitestContractFiles()', () => {
     expect(result.files[0]?.content).toContain("import { RangeLength } from '../../src/contracts.js'")
     expect(result.files[0]?.content).toContain("import { rangeLength } from '../../src/implementations.js'")
     expect(result.files[0]?.content).toContain('Check 1 postcondition over generated valid argument lists')
-    expect(result.files[0]?.content).toContain('    numRuns: 25,')
+    expect(result.files[0]?.content).toContain('    numRuns: 50,')
     expect(result.files[0]?.content).toContain('    invalidArgs: "reject",')
   })
 
-  it('generates files from tsconfig using the OXC + TypeScript workspace path', () => {
+  it('supports custom naming and skipping writes', () => {
+    const analysis = analyzeOxcDiscoveryWorkspace(createGenerationWorkspace())
+    const result = generateVitestContractFiles(analysis, {
+      outputDir: '/test/generated',
+      fileName: () => 'custom-suite.spec.ts',
+      writeFiles: false,
+      includePlanComments: false,
+    })
+
+    expect(result.files).toHaveLength(1)
+    expect(result.files[0]?.outputFilePath).toBe('/test/generated/custom-suite.spec.ts')
+    expect(result.files[0]?.content).not.toContain('Generated contract suite')
+  })
+
+  it('generates files from tsconfig using the default TypeScript workspace + OXC path', () => {
     const fixture = createGenerationTsConfigFixture()
 
     try {
       const analysis = analyzeOxcDiscoveryTsConfig(fixture.tsConfigFilePath)
       expect(analysis.discovery.contracts).toHaveLength(1)
 
-      const result = generateVitestContractFilesFromTsConfigWithOxc(fixture.tsConfigFilePath, {
+      const result = generateVitestContractFilesFromTsConfig(fixture.tsConfigFilePath, {
         outputDir: join(fixture.rootDir, 'test/generated'),
         runOptions: { invalidArgs: 'reject' },
       })
@@ -238,8 +177,9 @@ describe('generateVitestContractFiles()', () => {
 
   it('renders from a precomputed plan and can write generated files to the filesystem', () => {
     const analysis = analyzeOxcDiscoveryWorkspace(createGenerationWorkspace())
-    const plan = generateVitestContractFilesFromAnalysis(analysis, {
+    const plan = generateVitestContractFiles(analysis, {
       outputDir: '/unused',
+      writeFiles: false,
     }).plan
     const rendered = generateVitestContractFilesFromPlan(plan, {
       outputDir: '/virtual/generated',
@@ -265,10 +205,11 @@ describe('generateVitestContractFiles()', () => {
   })
 
   it('deduplicates colliding file names', () => {
-    const project = createCollisionProject()
-    const result = generateVitestContractFiles(project, {
+    const analysis = analyzeOxcDiscoveryWorkspace(createCollisionWorkspace())
+    const result = generateVitestContractFiles(analysis, {
       outputDir: '/test/generated',
       fileName: () => 'suite.test.ts',
+      writeFiles: false,
     })
 
     expect(result.files).toHaveLength(2)
@@ -279,19 +220,19 @@ describe('generateVitestContractFiles()', () => {
   })
 
   it('rejects invalid options', () => {
-    const project = createGenerationProject()
+    const analysis = analyzeOxcDiscoveryWorkspace(createGenerationWorkspace())
 
     expect(() => generateVitestContractFiles(null as any, { outputDir: '/test/generated' })).toThrow(
-      'project must be a ts-morph Project',
+      'analysis must include discovery data',
     )
-    expect(() => generateVitestContractFiles(project, null as any)).toThrow('options must be an object')
-    expect(() => generateVitestContractFiles(project, { outputDir: '' })).toThrow(
+    expect(() => generateVitestContractFiles(analysis, null as any)).toThrow('options must be an object')
+    expect(() => generateVitestContractFiles(analysis, { outputDir: '' })).toThrow(
       'options.outputDir must be a non-empty string',
     )
-    expect(() => generateVitestContractFiles(project, { outputDir: '/test/generated', fileName: 'bad' as any })).toThrow(
+    expect(() => generateVitestContractFiles(analysis, { outputDir: '/test/generated', fileName: 'bad' as any })).toThrow(
       'options.fileName must be a function',
     )
-    expect(() => generateVitestContractFilesFromAnalysis(null as any, { outputDir: '/test/generated' })).toThrow(
+    expect(() => generateVitestContractFiles(null as any, { outputDir: '/test/generated' })).toThrow(
       'analysis must include discovery data',
     )
     expect(() => generateVitestContractFilesFromPlan({ suites: [], contractsWithoutImplementations: [], unresolvedImplementations: [] }, null as any)).toThrow(

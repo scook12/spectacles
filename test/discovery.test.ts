@@ -1,86 +1,78 @@
 import { describe, expect, it } from 'vitest'
-import { Project } from 'ts-morph'
 
+import { createDiscoveryWorkspace } from '../discovery-backend.ts'
 import {
   discoverContracts,
   discoverImplementations,
   discoverProject,
 } from '../discovery.ts'
 
-function createDiscoveryProject(): Project {
-  const project = new Project({
-    useInMemoryFileSystem: true,
-    skipFileDependencyResolution: true,
-  })
+function createDiscoveryWorkspaceFixture() {
+  return createDiscoveryWorkspace([
+    {
+      filePath: '/src/contracts.ts',
+      text: `
+        import { contract as defineContract } from 'spectacles'
+        import { z } from 'zod'
 
-  project.createSourceFile(
-    '/src/contracts.ts',
-    `
-      import { contract as defineContract } from 'spectacles'
-      import { z } from 'zod'
+        export const NamedContract = defineContract('NamedContract', {
+          input: z.string(),
+          output: z.number(),
+        })
 
-      export const NamedContract = defineContract('NamedContract', {
-        input: z.string(),
-        output: z.number(),
-      })
+        const RenamedLocal = defineContract('RenamedRuntime', {
+          input: z.boolean(),
+          output: z.boolean(),
+        })
+        export { RenamedLocal as RenamedContract }
 
-      const RenamedLocal = defineContract('RenamedRuntime', {
-        input: z.boolean(),
-        output: z.boolean(),
-      })
-      export { RenamedLocal as RenamedContract }
+        export default defineContract('DefaultContract', {
+          input: z.number(),
+          output: z.number(),
+        })
+      `,
+    },
+    {
+      filePath: '/src/implementations.ts',
+      text: `
+        import DefaultContract, { NamedContract as AliasNamed, RenamedContract } from './contracts'
+        import * as defs from './contracts'
+        import { implement as bind } from 'spectacles'
 
-      export default defineContract('DefaultContract', {
-        input: z.number(),
-        output: z.number(),
-      })
-    `,
-  )
+        export const namedImpl = bind(AliasNamed, (input) => input.length)
+        export const renamedImpl = bind(RenamedContract, (input) => input)
+        export const namespaceImpl = bind(defs.NamedContract, (input) => input.length)
+        export default bind(DefaultContract, (input) => input)
+      `,
+    },
+    {
+      filePath: '/src/same-file.ts',
+      text: `
+        import { contract, implement } from 'spectacles'
+        import { z } from 'zod'
 
-  project.createSourceFile(
-    '/src/implementations.ts',
-    `
-      import DefaultContract, { NamedContract as AliasNamed, RenamedContract } from './contracts'
-      import * as defs from './contracts'
-      import { implement as bind } from 'spectacles'
+        export const LocalContract = contract('LocalContract', {
+          input: z.string(),
+          output: z.string(),
+        })
 
-      export const namedImpl = bind(AliasNamed, (input) => input.length)
-      export const renamedImpl = bind(RenamedContract, (input) => input)
-      export const namespaceImpl = bind(defs.NamedContract, (input) => input.length)
-      export default bind(DefaultContract, (input) => input)
-    `,
-  )
+        export const localImpl = implement(LocalContract, (input) => input)
+      `,
+    },
+    {
+      filePath: '/src/unresolved.ts',
+      text: `
+        import { implement } from 'spectacles'
 
-  project.createSourceFile(
-    '/src/same-file.ts',
-    `
-      import { contract, implement } from 'spectacles'
-      import { z } from 'zod'
-
-      export const LocalContract = contract('LocalContract', {
-        input: z.string(),
-        output: z.string(),
-      })
-
-      export const localImpl = implement(LocalContract, (input) => input)
-    `,
-  )
-
-  project.createSourceFile(
-    '/src/unresolved.ts',
-    `
-      import { implement } from 'spectacles'
-
-      export const unknownImpl = implement(MissingContract, (input) => input)
-    `,
-  )
-
-  return project
+        export const unknownImpl = implement(MissingContract, (input) => input)
+      `,
+    },
+  ])
 }
 
 describe('discovery', () => {
   it('discovers exported contracts, including aliased and default exports', () => {
-    const contracts = discoverContracts(createDiscoveryProject())
+    const contracts = discoverContracts(createDiscoveryWorkspaceFixture())
 
     expect(contracts).toHaveLength(4)
 
@@ -121,9 +113,9 @@ describe('discovery', () => {
   })
 
   it('discovers exported implementations and resolves their contracts', () => {
-    const project = createDiscoveryProject()
-    const contracts = discoverContracts(project)
-    const implementations = discoverImplementations(project, contracts)
+    const workspace = createDiscoveryWorkspaceFixture()
+    const contracts = discoverContracts(workspace)
+    const implementations = discoverImplementations(workspace, contracts)
 
     expect(implementations).toHaveLength(6)
 
@@ -206,7 +198,7 @@ describe('discovery', () => {
   })
 
   it('discovers contracts and implementations together', () => {
-    const result = discoverProject(createDiscoveryProject())
+    const result = discoverProject(createDiscoveryWorkspaceFixture())
 
     expect(result.contracts).toHaveLength(4)
     expect(result.implementations).toHaveLength(6)

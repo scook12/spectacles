@@ -12,7 +12,7 @@ Spectacles discovery has two distinct jobs:
    - resolve implementation-to-contract relationships
    - summarize the graph for planning, generation, and agent navigation
 
-This split matters because the current `ts-morph` path is excellent at project graph and module resolution, but relatively expensive for cold startup. Spectacles discovery is now explicit enough that the syntax scan can eventually move to a faster parser such as OXC without changing the higher-level planning/rendering pipeline.
+This split matters because project-graph loading and module resolution are separate concerns from syntax scanning. Spectacles discovery is explicit enough that a fast parser such as OXC can handle scanning while the TypeScript compiler API handles file-set loading and module resolution.
 
 ## Proposed backend split
 
@@ -31,12 +31,11 @@ That layer can continue to use TypeScript resolution internally even if the synt
 
 This layer should be backend-pluggable.
 
-Current backends:
-- `ts-morph`
-- first-pass `oxc` scanner module (`src/discovery-scanner-oxc.ts`)
+Current backend:
+- `oxc` scanner module (`src/discovery-scanner-oxc.ts`)
 
 Planned next step:
-- deepen the `oxc` scanner coverage until it can replace most syntax-walking dependence on `ts-morph`
+- continue tightening parity and simplifying the remaining pipeline around the OXC + TypeScript workspace path
 
 The scanner should stay **syntax-first** and **explicit**. Spectacles already benefits from explicit `contract(...)` and `implement(...)` bindings, so the scanner can avoid type-checker-heavy inference and instead focus on:
 
@@ -81,7 +80,6 @@ It currently introduces:
 - `DiscoveryResolver`
 - `createDiscoveryWorkspace(...)`
 - `createInMemoryDiscoveryResolver(...)`
-- `createTsMorphDiscoveryWorkspace(...)`
 - `createTypeScriptDiscoveryWorkspace(...)`
 - `DiscoveryAstScanner`
 - `createOxcDiscoveryAstScanner(...)`
@@ -98,7 +96,6 @@ It currently introduces:
 - `analyzeDiscoveryWorkspaceWithAstScanner(...)`
 - `discoverWorkspaceWithAstScanner(...)`
 - `createWorkspaceDiscoveryBackend(...)`
-- `createTsMorphDiscoveryBackend()`
 - `buildDiscoveryIndex(result)`
 - `describeOxcDiscoveryBackendPlan()`
 
@@ -114,10 +111,10 @@ The first-pass OXC-backed implementation now does the following:
 6. emit the same `DiscoveryResult` shape used today
 7. support a ready-to-use backend via `createOxcDiscoveryBackend(...)`
 8. preserve the compact `DiscoveryIndex` path
-9. feed scanned clause summaries directly into planning without re-reading contracts through `ts-morph`
-10. render and write generated test files from discovery analysis or plans without requiring a `Project`
+9. feed scanned clause summaries directly into planning without re-reading contracts through a separate AST layer
+10. render and write generated test files from discovery analysis or plans without requiring any project wrapper
 
-That keeps planning and generation unchanged while removing syntax walking from `ts-morph` for the scanned workspace path, and it introduces an initial TypeScript-compiler-backed file-set/module-resolution path that does not require a `ts-morph Project`.
+That keeps planning and generation unchanged while centering the pipeline on the TypeScript-compiler-backed file-set/module-resolution path plus OXC scanning.
 
 ## Why this is good for AI-agent tooling
 

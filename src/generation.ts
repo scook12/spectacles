@@ -1,8 +1,6 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, isAbsolute, resolve } from 'node:path'
 
-import { Project } from 'ts-morph'
-
 import type { OxcTsConfigDiscoveryAnalysis } from './discovery-scanner-oxc.js'
 import { analyzeOxcDiscoveryTsConfig } from './discovery-scanner-oxc.js'
 import type { DiscoveryAnalysis, GeneratedContractTestPlan, PlannedSuite } from './planning.js'
@@ -22,15 +20,10 @@ export interface GenerateVitestContractFileArtifactsOptions
   readonly fileName?: (suite: PlannedSuite, index: number) => string
 }
 
-export interface GenerateVitestContractFilesFromAnalysisOptions
+export interface GenerateVitestContractFilesOptions
   extends GenerateVitestContractFileArtifactsOptions {
   readonly plan?: GeneratedContractTestPlan
-}
-
-export interface GenerateVitestContractFilesOptions
-  extends GenerateVitestContractFilesFromAnalysisOptions {
-  readonly writeToProject?: boolean
-  readonly save?: boolean
+  readonly writeFiles?: boolean
 }
 
 export interface GenerateVitestContractFilesResult {
@@ -39,16 +32,6 @@ export interface GenerateVitestContractFilesResult {
 }
 
 export interface GenerateVitestContractFilesFromTsConfigResult
-  extends GenerateVitestContractFilesResult {
-  readonly project: Project
-}
-
-export interface GenerateVitestContractFilesFromTsConfigWithOxcOptions
-  extends GenerateVitestContractFilesFromAnalysisOptions {
-  readonly writeFiles?: boolean
-}
-
-export interface GenerateVitestContractFilesFromTsConfigWithOxcResult
   extends GenerateVitestContractFilesResult {
   readonly analysis: OxcTsConfigDiscoveryAnalysis
 }
@@ -227,17 +210,17 @@ export function generateVitestContractFilesFromPlan(
   return renderVitestContractFilesFromPlan(plan, options)
 }
 
-export function generateVitestContractFilesFromAnalysis(
+export function generateVitestContractFiles(
   analysis: DiscoveryAnalysis,
-  options: GenerateVitestContractFilesFromAnalysisOptions,
+  options: GenerateVitestContractFilesOptions,
 ): GenerateVitestContractFilesResult {
   if (!analysis || typeof analysis !== 'object' || !('discovery' in analysis)) {
     throw new TypeError(
-      'generateVitestContractFilesFromAnalysis(analysis, options): analysis must include discovery data',
+      'generateVitestContractFiles(analysis, options): analysis must include discovery data',
     )
   }
 
-  validateGenerateOptions(options, 'generateVitestContractFilesFromAnalysis(analysis, options)')
+  validateGenerateOptions(options, 'generateVitestContractFiles(analysis, options)')
 
   const plan = options.plan ?? generateContractTestPlan(
     analysis,
@@ -246,70 +229,19 @@ export function generateVitestContractFilesFromAnalysis(
       : undefined,
   )
 
-  return renderVitestContractFilesFromPlan(plan, options)
+  const result = renderVitestContractFilesFromPlan(plan, options)
+
+  if (options.writeFiles !== false) {
+    writeGeneratedVitestContractFiles(result.files)
+  }
+
+  return result
 }
 
 export function writeGeneratedVitestContractFiles(files: readonly GeneratedVitestContractFile[]): void {
   for (const file of files) {
     mkdirSync(dirname(file.outputFilePath), { recursive: true })
     writeFileSync(file.outputFilePath, file.content)
-  }
-}
-
-export function generateVitestContractFiles(
-  project: Project,
-  options: GenerateVitestContractFilesOptions,
-): GenerateVitestContractFilesResult {
-  if (!(project instanceof Project)) {
-    throw new TypeError('generateVitestContractFiles(project, options): project must be a ts-morph Project')
-  }
-
-  validateGenerateOptions(options, 'generateVitestContractFiles(project, options)')
-
-  const plan = options.plan ?? generateContractTestPlan(
-    project,
-    options.runOptions?.invalidArgs !== undefined
-      ? { invalidArgs: options.runOptions.invalidArgs }
-      : undefined,
-  )
-  const result = renderVitestContractFilesFromPlan(plan, options)
-
-  if (options.writeToProject !== false) {
-    for (const file of result.files) {
-      project.createSourceFile(file.outputFilePath, file.content, { overwrite: true })
-    }
-
-    if (options.save === true) {
-      project.saveSync()
-    }
-  }
-
-  return result
-}
-
-export function generateVitestContractFilesFromTsConfigWithOxc(
-  tsConfigFilePath: string,
-  options: GenerateVitestContractFilesFromTsConfigWithOxcOptions,
-): GenerateVitestContractFilesFromTsConfigWithOxcResult {
-  if (typeof tsConfigFilePath !== 'string' || tsConfigFilePath.length === 0) {
-    throw new TypeError(
-      'generateVitestContractFilesFromTsConfigWithOxc(tsConfigFilePath, options): tsConfigFilePath must be a non-empty string',
-    )
-  }
-
-  validateGenerateOptions(options, 'generateVitestContractFilesFromTsConfigWithOxc(tsConfigFilePath, options)')
-
-  const analysis = analyzeOxcDiscoveryTsConfig(tsConfigFilePath)
-  const result = generateVitestContractFilesFromAnalysis(analysis, options)
-
-  if (options.writeFiles !== false) {
-    writeGeneratedVitestContractFiles(result.files)
-  }
-
-  return {
-    analysis,
-    plan: result.plan,
-    files: result.files,
   }
 }
 
@@ -323,17 +255,13 @@ export function generateVitestContractFilesFromTsConfig(
     )
   }
 
-  const project = new Project({
-    tsConfigFilePath,
-  })
+  validateGenerateOptions(options, 'generateVitestContractFilesFromTsConfig(tsConfigFilePath, options)')
 
-  const result = generateVitestContractFiles(project, {
-    ...options,
-    save: options.save ?? true,
-  })
+  const analysis = analyzeOxcDiscoveryTsConfig(tsConfigFilePath)
+  const result = generateVitestContractFiles(analysis, options)
 
   return {
-    project,
+    analysis,
     plan: result.plan,
     files: result.files,
   }

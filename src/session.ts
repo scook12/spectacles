@@ -1,6 +1,10 @@
-import { Project } from 'ts-morph'
-
-import { discoverProject, type DiscoveryResult } from './discovery.js'
+import type { DiscoveryWorkspace } from './discovery-backend.js'
+import type { DiscoveryResult } from './discovery.js'
+import type { OxcTsConfigDiscoveryAnalysis } from './discovery-scanner-oxc.js'
+import {
+  analyzeOxcDiscoveryTsConfig,
+  analyzeOxcDiscoveryWorkspace,
+} from './discovery-scanner-oxc.js'
 import {
   generateVitestContractFiles,
   type GenerateVitestContractFilesOptions,
@@ -8,17 +12,17 @@ import {
 } from './generation.js'
 import {
   generateContractTestPlan,
+  type DiscoveryAnalysis,
   type GenerateContractTestPlanOptions,
   type GeneratedContractTestPlan,
-  type ProjectAnalysis,
 } from './planning.js'
 
 export type SpectaclesSessionSource =
-  | { readonly project: Project }
+  | { readonly workspace: DiscoveryWorkspace }
   | { readonly tsConfigFilePath: string }
 
 export interface SpectaclesSession {
-  readonly project: () => Project
+  readonly analysis: () => DiscoveryAnalysis
   readonly discovery: () => DiscoveryResult
   readonly plan: (options?: GenerateContractTestPlanOptions) => GeneratedContractTestPlan
   readonly generate: (options: GenerateVitestContractFilesOptions) => GenerateVitestContractFilesResult
@@ -35,28 +39,27 @@ function isTsConfigSource(source: SpectaclesSessionSource): source is { readonly
 }
 
 export function createSpectaclesSession(source: SpectaclesSessionSource): SpectaclesSession {
-  let cachedProject: Project | undefined = 'project' in source ? source.project : undefined
-  let cachedDiscovery: DiscoveryResult | undefined
+  let cachedAnalysis: DiscoveryAnalysis | undefined
+  let cachedTsConfigAnalysis: OxcTsConfigDiscoveryAnalysis | undefined
   const planCache = new Map<string, GeneratedContractTestPlan>()
 
-  function getProject(): Project {
-    if (!cachedProject) {
-      if (!isTsConfigSource(source)) {
-        throw new TypeError('createSpectaclesSession(source): no project or tsConfigFilePath available')
-      }
-
-      cachedProject = new Project({ tsConfigFilePath: source.tsConfigFilePath })
+  function getAnalysis(): DiscoveryAnalysis {
+    if (cachedAnalysis) {
+      return cachedAnalysis
     }
 
-    return cachedProject
+    if (isTsConfigSource(source)) {
+      cachedTsConfigAnalysis ??= analyzeOxcDiscoveryTsConfig(source.tsConfigFilePath)
+      cachedAnalysis = cachedTsConfigAnalysis
+      return cachedAnalysis
+    }
+
+    cachedAnalysis = analyzeOxcDiscoveryWorkspace(source.workspace)
+    return cachedAnalysis
   }
 
   function getDiscovery(): DiscoveryResult {
-    if (!cachedDiscovery) {
-      cachedDiscovery = discoverProject(getProject())
-    }
-
-    return cachedDiscovery
+    return getAnalysis().discovery
   }
 
   function getPlan(options?: GenerateContractTestPlanOptions): GeneratedContractTestPlan {
@@ -66,11 +69,7 @@ export function createSpectaclesSession(source: SpectaclesSessionSource): Specta
       return cachedPlan
     }
 
-    const analysis: ProjectAnalysis = {
-      project: getProject(),
-      discovery: getDiscovery(),
-    }
-    const plan = generateContractTestPlan(analysis, options)
+    const plan = generateContractTestPlan(getAnalysis(), options)
     planCache.set(key, plan)
     return plan
   }
@@ -79,14 +78,14 @@ export function createSpectaclesSession(source: SpectaclesSessionSource): Specta
     const invalidArgs = options.runOptions?.invalidArgs
     const plan = getPlan(invalidArgs !== undefined ? { invalidArgs } : undefined)
 
-    return generateVitestContractFiles(getProject(), {
+    return generateVitestContractFiles(getAnalysis(), {
       ...options,
       plan,
     })
   }
 
   return {
-    project: getProject,
+    analysis: getAnalysis,
     discovery: getDiscovery,
     plan: getPlan,
     generate,

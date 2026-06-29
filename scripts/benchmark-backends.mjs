@@ -3,19 +3,11 @@
 import { performance } from 'node:perf_hooks'
 import { resolve } from 'node:path'
 
-import { Project } from 'ts-morph'
-
-import {
-  analyzeDiscoveryWorkspaceWithAstScanner,
-  createTypeScriptDiscoveryWorkspace,
-} from '../dist/discovery-backend.js'
-import { discoverProject } from '../dist/discovery.js'
-import { createOxcDiscoveryAstScanner, analyzeOxcDiscoveryTsConfig } from '../dist/discovery-scanner-oxc.js'
+import { createTypeScriptDiscoveryWorkspace } from '../dist/discovery-backend.js'
+import { analyzeOxcDiscoveryTsConfig, analyzeOxcDiscoveryWorkspace } from '../dist/discovery-scanner-oxc.js'
 import {
   generateVitestContractFiles,
-  generateVitestContractFilesFromAnalysis,
   generateVitestContractFilesFromTsConfig,
-  generateVitestContractFilesFromTsConfigWithOxc,
 } from '../dist/generation.js'
 import { generateContractTestPlan } from '../dist/planning.js'
 
@@ -44,14 +36,6 @@ function summarize(label, samples) {
   }
 }
 
-function preferredExportName(exportNames, isDefaultExport) {
-  if (isDefaultExport && exportNames.includes('default')) {
-    return 'default'
-  }
-
-  return exportNames[0] ?? 'default'
-}
-
 function normalizeDiscovery(discovery) {
   return {
     contracts: [...discovery.contracts]
@@ -59,9 +43,16 @@ function normalizeDiscovery(discovery) {
         filePath: contract.filePath,
         localName: contract.localName ?? null,
         exportNames: [...contract.exportNames],
-        preferredExportName: preferredExportName(contract.exportNames, contract.isDefaultExport),
         isDefaultExport: contract.isDefaultExport,
         runtimeName: contract.runtimeName ?? null,
+        source: contract.source
+          ? {
+            filePath: contract.source.filePath,
+            exportName: contract.source.exportName,
+            localName: contract.source.localName ?? null,
+            runtimeName: contract.source.runtimeName ?? null,
+          }
+          : null,
       }))
       .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right))),
     implementations: [...discovery.implementations]
@@ -69,7 +60,6 @@ function normalizeDiscovery(discovery) {
         filePath: implementation.filePath,
         localName: implementation.localName ?? null,
         exportNames: [...implementation.exportNames],
-        preferredExportName: preferredExportName(implementation.exportNames, implementation.isDefaultExport),
         isDefaultExport: implementation.isDefaultExport,
         contract: implementation.contract
           ? {
@@ -126,10 +116,7 @@ function normalizePlan(plan) {
 
 function normalizeGeneratedFiles(result) {
   return [...result.files]
-    .map((file) => ({
-      outputFilePath: file.outputFilePath,
-      content: file.content,
-    }))
+    .map((file) => ({ outputFilePath: file.outputFilePath, content: file.content }))
     .sort((left, right) => left.outputFilePath.localeCompare(right.outputFilePath))
 }
 
@@ -142,108 +129,57 @@ function assertEqual(label, left, right) {
 }
 
 function validateParity() {
-  const project = new Project({ tsConfigFilePath })
-  const tsMorphDiscovery = discoverProject(project)
-  const tsMorphPlan = generateContractTestPlan({
-    project,
-    discovery: tsMorphDiscovery,
-  })
-  const tsMorphGenerated = generateVitestContractFiles(project, {
+  const analysisFromTsConfig = analyzeOxcDiscoveryTsConfig(tsConfigFilePath)
+  const workspace = createTypeScriptDiscoveryWorkspace(tsConfigFilePath)
+  const analysisFromWorkspace = analyzeOxcDiscoveryWorkspace(workspace)
+  const planA = generateContractTestPlan(analysisFromTsConfig)
+  const planB = generateContractTestPlan(analysisFromWorkspace)
+  const generatedA = generateVitestContractFiles(analysisFromTsConfig, {
     outputDir,
-    plan: tsMorphPlan,
-    writeToProject: false,
-    save: false,
+    plan: planA,
+    writeFiles: false,
+  })
+  const generatedB = generateVitestContractFiles(analysisFromWorkspace, {
+    outputDir,
+    plan: planB,
+    writeFiles: false,
   })
 
-  const oxcAnalysis = analyzeOxcDiscoveryTsConfig(tsConfigFilePath)
-  const oxcPlan = generateContractTestPlan(oxcAnalysis)
-  const oxcGenerated = generateVitestContractFilesFromAnalysis(oxcAnalysis, {
-    outputDir,
-    plan: oxcPlan,
-  })
-
-  assertEqual('discovery', normalizeDiscovery(tsMorphDiscovery), normalizeDiscovery(oxcAnalysis.discovery))
-  assertEqual('plan', normalizePlan(tsMorphPlan), normalizePlan(oxcPlan))
-  assertEqual('generated files', normalizeGeneratedFiles(tsMorphGenerated), normalizeGeneratedFiles(oxcGenerated))
+  assertEqual('discovery', normalizeDiscovery(analysisFromTsConfig.discovery), normalizeDiscovery(analysisFromWorkspace.discovery))
+  assertEqual('plan', normalizePlan(planA), normalizePlan(planB))
+  assertEqual('generated files', normalizeGeneratedFiles(generatedA), normalizeGeneratedFiles(generatedB))
 }
 
 validateParity()
 
 const samples = {
-  coldTsMorphProjectBootstrap: [],
-  coldTypeScriptWorkspaceBootstrap: [],
-  coldTsMorphDiscover: [],
-  coldOxcAnalyzeTsConfig: [],
-  warmTsMorphDiscover: [],
-  warmOxcAnalyzeWorkspace: [],
-  warmTsMorphPlan: [],
-  warmOxcPlan: [],
-  warmTsMorphGenerate: [],
-  warmOxcGenerate: [],
-  coldTsMorphTsConfigWrapper: [],
-  coldOxcTsConfigWrapper: [],
+  coldWorkspaceBootstrap: [],
+  coldAnalyzeTsConfig: [],
+  warmAnalyzeWorkspace: [],
+  warmPlan: [],
+  warmGenerate: [],
+  coldTsConfigWrapper: [],
 }
 
 for (let index = 0; index < runs; index += 1) {
-  samples.coldTsMorphProjectBootstrap.push(
-    measure(() => {
-      const project = new Project({ tsConfigFilePath })
-      return project.getSourceFiles().length
-    }).ms,
-  )
-
-  samples.coldTypeScriptWorkspaceBootstrap.push(
-    measure(() => createTypeScriptDiscoveryWorkspace(tsConfigFilePath)).ms,
-  )
-
-  samples.coldTsMorphDiscover.push(
-    measure(() => {
-      const project = new Project({ tsConfigFilePath })
-      return discoverProject(project)
-    }).ms,
-  )
-
-  samples.coldOxcAnalyzeTsConfig.push(
-    measure(() => analyzeOxcDiscoveryTsConfig(tsConfigFilePath)).ms,
-  )
-
-  const project = new Project({ tsConfigFilePath })
-  const tsMorphDiscovery = discoverProject(project)
-  const tsMorphPlan = generateContractTestPlan({ project, discovery: tsMorphDiscovery })
+  samples.coldWorkspaceBootstrap.push(measure(() => createTypeScriptDiscoveryWorkspace(tsConfigFilePath)).ms)
+  samples.coldAnalyzeTsConfig.push(measure(() => analyzeOxcDiscoveryTsConfig(tsConfigFilePath)).ms)
 
   const workspace = createTypeScriptDiscoveryWorkspace(tsConfigFilePath)
-  const scanner = createOxcDiscoveryAstScanner()
-  const oxcAnalysis = analyzeDiscoveryWorkspaceWithAstScanner(workspace, scanner)
-  const oxcPlan = generateContractTestPlan(oxcAnalysis)
+  const analysis = analyzeOxcDiscoveryWorkspace(workspace)
+  const plan = generateContractTestPlan(analysis)
 
-  samples.warmTsMorphDiscover.push(measure(() => discoverProject(project)).ms)
-  samples.warmOxcAnalyzeWorkspace.push(measure(() => analyzeDiscoveryWorkspaceWithAstScanner(workspace, scanner)).ms)
-  samples.warmTsMorphPlan.push(measure(() => generateContractTestPlan({ project, discovery: tsMorphDiscovery })).ms)
-  samples.warmOxcPlan.push(measure(() => generateContractTestPlan(oxcAnalysis)).ms)
-  samples.warmTsMorphGenerate.push(
-    measure(() => generateVitestContractFiles(project, {
+  samples.warmAnalyzeWorkspace.push(measure(() => analyzeOxcDiscoveryWorkspace(workspace)).ms)
+  samples.warmPlan.push(measure(() => generateContractTestPlan(analysis)).ms)
+  samples.warmGenerate.push(
+    measure(() => generateVitestContractFiles(analysis, {
       outputDir,
-      plan: tsMorphPlan,
-      writeToProject: false,
-      save: false,
+      plan,
+      writeFiles: false,
     })).ms,
   )
-  samples.warmOxcGenerate.push(
-    measure(() => generateVitestContractFilesFromAnalysis(oxcAnalysis, {
-      outputDir,
-      plan: oxcPlan,
-    })).ms,
-  )
-
-  samples.coldTsMorphTsConfigWrapper.push(
+  samples.coldTsConfigWrapper.push(
     measure(() => generateVitestContractFilesFromTsConfig(tsConfigFilePath, {
-      outputDir,
-      writeToProject: false,
-      save: false,
-    })).ms,
-  )
-  samples.coldOxcTsConfigWrapper.push(
-    measure(() => generateVitestContractFilesFromTsConfigWithOxc(tsConfigFilePath, {
       outputDir,
       writeFiles: false,
     })).ms,
@@ -251,16 +187,10 @@ for (let index = 0; index < runs; index += 1) {
 }
 
 console.table([
-  summarize('cold ts-morph project bootstrap', samples.coldTsMorphProjectBootstrap),
-  summarize('cold TS workspace bootstrap', samples.coldTypeScriptWorkspaceBootstrap),
-  summarize('cold ts-morph discover', samples.coldTsMorphDiscover),
-  summarize('cold OXC analyze(tsconfig)', samples.coldOxcAnalyzeTsConfig),
-  summarize('warm ts-morph discover', samples.warmTsMorphDiscover),
-  summarize('warm OXC analyze(workspace)', samples.warmOxcAnalyzeWorkspace),
-  summarize('warm ts-morph plan', samples.warmTsMorphPlan),
-  summarize('warm OXC plan', samples.warmOxcPlan),
-  summarize('warm ts-morph generate', samples.warmTsMorphGenerate),
-  summarize('warm OXC generate', samples.warmOxcGenerate),
-  summarize('cold ts-morph tsconfig wrapper', samples.coldTsMorphTsConfigWrapper),
-  summarize('cold OXC tsconfig wrapper', samples.coldOxcTsConfigWrapper),
+  summarize('cold TS workspace bootstrap', samples.coldWorkspaceBootstrap),
+  summarize('cold OXC analyze(tsconfig)', samples.coldAnalyzeTsConfig),
+  summarize('warm OXC analyze(workspace)', samples.warmAnalyzeWorkspace),
+  summarize('warm plan(analysis)', samples.warmPlan),
+  summarize('warm generate', samples.warmGenerate),
+  summarize('cold tsconfig wrapper', samples.coldTsConfigWrapper),
 ])

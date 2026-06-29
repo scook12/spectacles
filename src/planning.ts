@@ -1,5 +1,3 @@
-import { Node, Project, SourceFile } from 'ts-morph'
-
 import type { ScannedSourceFile } from './discovery-backend.js'
 import type {
   DiscoveredContract,
@@ -7,7 +5,6 @@ import type {
   DiscoveryResult,
   ResolvedContractReference,
 } from './discovery.js'
-import { discoverProject } from './discovery.js'
 
 export type PlanSource = 'engine' | 'contract'
 export type PlanConfidence = 'sound' | 'derived'
@@ -65,10 +62,6 @@ export interface DiscoveryAnalysis {
   readonly scannedFiles?: readonly ScannedSourceFile[]
 }
 
-export interface ProjectAnalysis extends DiscoveryAnalysis {
-  readonly project: Project
-}
-
 export interface GeneratedContractTestPlan {
   readonly suites: readonly PlannedSuite[]
   readonly contractsWithoutImplementations: readonly PlannedReference[]
@@ -92,8 +85,8 @@ function fileStem(filePath: string): string {
 
 function toSuggestedLocalName(args: {
   exportName: string
-  localName?: string | undefined
-  runtimeName?: string | undefined
+  localName?: string
+  runtimeName?: string
   filePath: string
 }): string {
   if (args.localName) {
@@ -121,112 +114,31 @@ function toPlannedReference(
     ? preferredExportName(value.exportNames, value.isDefaultExport)
     : value.exportName
 
-  const localName = toSuggestedLocalName({
+  const suggestedLocalNameArgs: {
+    exportName: string
+    localName?: string
+    runtimeName?: string
+    filePath: string
+  } = {
     exportName,
-    localName: value.localName,
-    runtimeName: 'runtimeName' in value ? value.runtimeName : undefined,
     filePath: value.filePath,
-  })
+  }
+
+  if (value.localName !== undefined) {
+    suggestedLocalNameArgs.localName = value.localName
+  }
+
+  if ('runtimeName' in value && value.runtimeName !== undefined) {
+    suggestedLocalNameArgs.runtimeName = value.runtimeName
+  }
+
+  const localName = toSuggestedLocalName(suggestedLocalNameArgs)
 
   return {
     filePath: value.filePath,
     exportName,
     localName,
     ...('runtimeName' in value && value.runtimeName !== undefined ? { runtimeName: value.runtimeName } : {}),
-  }
-}
-
-function findSourceFile(project: Project, filePath: string): SourceFile | undefined {
-  return project.getSourceFile((candidate) => candidate.getFilePath() === filePath)
-}
-
-function findContractExpression(sourceFile: SourceFile, contract: DiscoveredContract) {
-  if (contract.localName) {
-    const declaration = sourceFile.getVariableDeclaration(contract.localName)
-    const initializer = declaration?.getInitializer()
-    return initializer && Node.isCallExpression(initializer) ? initializer : undefined
-  }
-
-  for (const exportAssignment of sourceFile.getExportAssignments()) {
-    if (exportAssignment.isExportEquals()) {
-      continue
-    }
-
-    const expression = exportAssignment.getExpression()
-    if (expression && Node.isCallExpression(expression)) {
-      return expression
-    }
-  }
-
-  return undefined
-}
-
-function stringArgumentName(node: Node | undefined): string | undefined {
-  if (!node) {
-    return undefined
-  }
-
-  if (Node.isStringLiteral(node) || Node.isNoSubstitutionTemplateLiteral(node)) {
-    return node.getLiteralValue()
-  }
-
-  return undefined
-}
-
-function summarizeContractClausesFromExpression(expression: Node): ContractClauseSummary {
-  let current: Node | undefined = expression
-  const preNames: string[] = []
-  const postNames: string[] = []
-  const lawNames: string[] = []
-  const exampleNames: string[] = []
-  let whereCount = 0
-
-  while (current && Node.isCallExpression(current)) {
-    const callExpression = current as import('ts-morph').CallExpression
-    const callee = callExpression.getExpression() as import('ts-morph').Node
-
-    if (!Node.isPropertyAccessExpression(callee)) {
-      break
-    }
-
-    const methodName = callee.getName()
-    const firstArgumentName = stringArgumentName(callExpression.getArguments()[0])
-
-    switch (methodName) {
-      case 'where':
-        whereCount += callExpression.getArguments().length
-        break
-      case 'pre':
-        if (firstArgumentName) {
-          preNames.push(firstArgumentName)
-        }
-        break
-      case 'post':
-        if (firstArgumentName) {
-          postNames.push(firstArgumentName)
-        }
-        break
-      case 'law':
-        if (firstArgumentName) {
-          lawNames.push(firstArgumentName)
-        }
-        break
-      case 'example':
-        if (firstArgumentName) {
-          exampleNames.push(firstArgumentName)
-        }
-        break
-    }
-
-    current = callee.getExpression()
-  }
-
-  return {
-    whereCount,
-    preNames: Object.freeze(preNames.reverse()),
-    postNames: Object.freeze(postNames.reverse()),
-    lawNames: Object.freeze(lawNames.reverse()),
-    exampleNames: Object.freeze(exampleNames.reverse()),
   }
 }
 
@@ -238,20 +150,6 @@ function emptyContractClauseSummary(): ContractClauseSummary {
     lawNames: Object.freeze([]),
     exampleNames: Object.freeze([]),
   }
-}
-
-function summarizeContractClauses(project: Project, contract: DiscoveredContract): ContractClauseSummary {
-  const sourceFile = findSourceFile(project, contract.filePath)
-  if (!sourceFile) {
-    return emptyContractClauseSummary()
-  }
-
-  const expression = findContractExpression(sourceFile, contract)
-  if (!expression) {
-    return emptyContractClauseSummary()
-  }
-
-  return summarizeContractClausesFromExpression(expression)
 }
 
 function contractReferenceKey(reference: PlannedReference): string {
@@ -397,7 +295,7 @@ function buildScannedContractClauseSummaryIndex(
 
   for (const file of scannedFiles) {
     for (const contract of file.contracts) {
-      const summary = {
+      const summary: ContractClauseSummary = {
         whereCount: contract.clauseSummary.whereCount,
         preNames: contract.clauseSummary.preNames,
         postNames: contract.clauseSummary.postNames,
@@ -446,7 +344,6 @@ function collectImplementedContractKeys(
 
 function planFromDiscovery(
   discovery: DiscoveryResult,
-  project: Project | undefined,
   scannedFiles: readonly ScannedSourceFile[] | undefined,
   options: GenerateContractTestPlanOptions,
 ): GeneratedContractTestPlan {
@@ -480,8 +377,7 @@ function planFromDiscovery(
 
     const contractReference = toPlannedReference(contract)
     const implementationReference = toPlannedReference(implementation)
-    const summary = clauseSummaries.get(contractKey)
-      ?? (project ? summarizeContractClauses(project, contract) : emptyContractClauseSummary())
+    const summary = clauseSummaries.get(contractKey) ?? emptyContractClauseSummary()
 
     suites.push({
       kind: 'suite',
@@ -505,10 +401,6 @@ function planFromDiscovery(
 }
 
 export function generateContractTestPlan(
-  project: Project,
-  options?: GenerateContractTestPlanOptions,
-): GeneratedContractTestPlan
-export function generateContractTestPlan(
   discovery: DiscoveryResult,
   options?: GenerateContractTestPlanOptions,
 ): GeneratedContractTestPlan
@@ -517,25 +409,12 @@ export function generateContractTestPlan(
   options?: GenerateContractTestPlanOptions,
 ): GeneratedContractTestPlan
 export function generateContractTestPlan(
-  analysis: ProjectAnalysis,
-  options?: GenerateContractTestPlanOptions,
-): GeneratedContractTestPlan
-export function generateContractTestPlan(
-  input: Project | DiscoveryResult | DiscoveryAnalysis | ProjectAnalysis,
+  input: DiscoveryResult | DiscoveryAnalysis,
   options: GenerateContractTestPlanOptions = {},
 ): GeneratedContractTestPlan {
-  if (input instanceof Project) {
-    return planFromDiscovery(discoverProject(input), input, undefined, options)
-  }
-
   if ('discovery' in input) {
-    return planFromDiscovery(
-      input.discovery,
-      'project' in input ? input.project : undefined,
-      input.scannedFiles,
-      options,
-    )
+    return planFromDiscovery(input.discovery, input.scannedFiles, options)
   }
 
-  return planFromDiscovery(input, undefined, undefined, options)
+  return planFromDiscovery(input, undefined, options)
 }

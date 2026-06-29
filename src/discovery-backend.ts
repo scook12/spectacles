@@ -1,13 +1,11 @@
 import { dirname, isAbsolute, normalize, resolve } from 'node:path'
 
-import { Project, ts } from 'ts-morph'
-
-import {
-  discoverProject,
-  type DiscoveredContract,
-  type DiscoveredImplementation,
-  type DiscoveryResult,
-  type ResolvedContractReference,
+import * as ts from 'typescript'
+import type {
+  DiscoveredContract,
+  DiscoveredImplementation,
+  DiscoveryResult,
+  ResolvedContractReference,
 } from './discovery.js'
 
 export interface DiscoveryBackendCapabilities {
@@ -49,10 +47,6 @@ export interface DiscoveryWorkspace {
 
 export interface TypeScriptDiscoveryWorkspace extends DiscoveryWorkspace {
   readonly tsConfigFilePath: string
-}
-
-export interface TsMorphDiscoveryWorkspace extends DiscoveryWorkspace {
-  readonly project: Project
 }
 
 export interface DiscoverySourceSpan {
@@ -169,10 +163,6 @@ export interface OxcParserAdapter<Ast = unknown> {
 export interface OxcDiscoveryBackendOptions<Ast = unknown> {
   readonly parser: OxcParserAdapter<Ast>
 }
-
-export type TsMorphDiscoveryBackendInput =
-  | Project
-  | { readonly tsConfigFilePath: string }
 
 export interface DiscoveryIndexContractNode extends DiscoveredContract {
   readonly id: string
@@ -614,51 +604,6 @@ export function createTypeScriptDiscoveryWorkspace(tsConfigFilePath: string): Ty
   return {
     ...workspace,
     tsConfigFilePath: absoluteTsConfigFilePath,
-  }
-}
-
-export function createTsMorphDiscoveryWorkspace(input: TsMorphDiscoveryBackendInput): TsMorphDiscoveryWorkspace {
-  const project = input instanceof Project
-    ? input
-    : new Project({ tsConfigFilePath: input.tsConfigFilePath })
-
-  const files = project.getSourceFiles().map((sourceFile) => ({
-    filePath: sourceFile.getFilePath(),
-    text: sourceFile.getFullText(),
-  }))
-  const resolutions = new Map<string, DiscoveryModuleResolution>()
-
-  for (const sourceFile of project.getSourceFiles()) {
-    for (const importDeclaration of sourceFile.getImportDeclarations()) {
-      const specifier = importDeclaration.getModuleSpecifierValue()
-      const importedSourceFile = importDeclaration.getModuleSpecifierSourceFile()
-      resolutions.set(
-        createResolutionKey(sourceFile.getFilePath(), specifier),
-        importedSourceFile
-          ? {
-            fromFilePath: sourceFile.getFilePath(),
-            specifier,
-            resolvedFilePath: importedSourceFile.getFilePath(),
-            resolutionKind: 'source-file',
-          }
-          : defaultResolution(sourceFile.getFilePath(), specifier),
-      )
-    }
-  }
-
-  const workspace = createDiscoveryWorkspace(files, {
-    rootDir: project.getDirectoryOrThrow(project.getCompilerOptions().rootDir ?? '.').getPath(),
-    resolver: {
-      resolveModule(fromFilePath: string, specifier: string): DiscoveryModuleResolution {
-        return resolutions.get(createResolutionKey(fromFilePath, specifier))
-          ?? defaultResolution(fromFilePath, specifier)
-      },
-    },
-  })
-
-  return {
-    ...workspace,
-    project,
   }
 }
 
@@ -1158,26 +1103,6 @@ export function buildDiscoveryIndex(result: DiscoveryResult): DiscoveryIndex {
     implementationsById: Object.freeze(implementationsById),
     unresolvedImplementationIds: Object.freeze(unresolvedImplementationIds),
     unimplementedContractIds: Object.freeze(unimplementedContractIds),
-  }
-}
-
-export function createTsMorphDiscoveryBackend(): DiscoveryBackend<TsMorphDiscoveryBackendInput> {
-  return {
-    name: 'ts-morph',
-    capabilities: {
-      supportsTsConfigProjects: true,
-      supportsModuleResolution: true,
-      supportsSourceTextWorkspaces: true,
-      preservesOperationalImports: true,
-      intendedConsumers: ['library', 'agent-tool'],
-    },
-    discover(input) {
-      const project = input instanceof Project
-        ? input
-        : new Project({ tsConfigFilePath: input.tsConfigFilePath })
-
-      return discoverProject(project)
-    },
   }
 }
 
