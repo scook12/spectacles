@@ -19,6 +19,7 @@ Spectacles is designed to bridge the gap between structured prompting, technical
 Put simply, you or your agent:
  - Write contracts that strictly describe implementations in terms of shape, invariants, inputs, and outputs
  - Implement those contracts
+
 And spectacles rewards you with:
  - Deterministically generated functional and property-based test suites for your implementations
  - Fast, low-token code navigation for your agent between contracts and their implementation sites
@@ -59,7 +60,9 @@ The `spectacles_navigate` tool exposes compact Spectacles discovery/index data d
 - `implementation`
 - `issues`
 
-## 1. Write contracts
+## Usage
+
+### 1. Write contracts
 
 Define a contract with schemas and optional semantic clauses.
 
@@ -110,7 +113,7 @@ export const AddOrdered = contract('AddOrdered', {
   })
 ```
 
-## 2. Bind implementations explicitly
+### 2. Bind implementations explicitly
 
 Spectacles discovers implementations through `implement(...)` calls.
 
@@ -122,9 +125,9 @@ import { RangeLength } from './contracts'
 export const rangeLength = implement(RangeLength, ({ start, end }) => end - start)
 ```
 
-## 3. Generate Vitest contract suites
+### 3. Generate Vitest contract suites
 
-### CLI
+#### CLI
 
 The CLI is the cleanest entrypoint for most users.
 
@@ -169,7 +172,7 @@ Other flags:
 - `--dry-run` — do not write files; print what would be generated
 - `--help` — show CLI help
 
-### Programmatic generation
+#### Programmatic generation
 
 If you want to generate files in code:
 
@@ -240,7 +243,7 @@ For `tsConfigFilePath` sessions, Spectacles memoizes the TypeScript workspace + 
 
 The default tsconfig-based discovery/generation path now uses the TypeScript workspace + OXC scanner flow. A backend sketch plus the OXC scanner support while preserving resolver-backed module resolution lives in `docs/discovery-backends.md`, `spectacles/discovery-backend`, and `spectacles/discovery-scanner-oxc`.
 
-## 4. Run the generated tests
+### 4. Run the generated tests
 
 Generated test files use the Vitest adapter:
 
@@ -254,7 +257,7 @@ So once files are generated, run them with Vitest as usual:
 vitest
 ```
 
-## Lower-level APIs
+### Lower-level APIs
 
 Spectacles also exposes lower-level building blocks if you need custom workflows:
 
@@ -265,7 +268,7 @@ Spectacles also exposes lower-level building blocks if you need custom workflows
 - `spectacles/rendering` — render one planned suite to Vitest source
 - `spectacles/generation` — generate full test files from discovery analysis, tsconfig input, or precomputed plans
 
-## Current discovery model
+### Current discovery model
 
 Discovery is intentionally explicit.
 
@@ -315,7 +318,7 @@ describe('RangeLength / rangeLength', () => {
 })
 ```
 
-## Examples
+### Examples
 
 A larger example lives in:
 
@@ -323,7 +326,7 @@ A larger example lives in:
 
 It shows a service-shaped contract design with multiple operations, a concrete in-memory implementation, and a generation script for producing Vitest contract suites.
 
-## Package entrypoints
+### Package entrypoints
 
 Primary entrypoints:
 
