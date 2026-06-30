@@ -30,6 +30,9 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "pi": {
+    "extensions": [
+      "./extensions"
+    ],
     "skills": [
       "./skills"
     ]
@@ -67,6 +70,10 @@
       "types": "./dist/generation.d.ts",
       "import": "./dist/generation.js"
     },
+    "./navigation": {
+      "types": "./dist/navigation.d.ts",
+      "import": "./dist/navigation.js"
+    },
     "./session": {
       "types": "./dist/session.d.ts",
       "import": "./dist/session.js"
@@ -76,6 +83,7 @@
   "files": [
     "dist",
     "examples",
+    "extensions",
     "skills",
     "README.md",
     "LICENSE"
@@ -99,10 +107,14 @@
     "typescript": "^5.9.3"
   },
   "peerDependencies": {
+    "typebox": "*",
     "vitest": "^3.2.4",
     "zod": "^4.4.3"
   },
   "peerDependenciesMeta": {
+    "typebox": {
+      "optional": true
+    },
     "vitest": {
       "optional": true
     }

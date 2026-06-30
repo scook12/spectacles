@@ -30,7 +30,27 @@ When asked to implement or modify behavior, prefer this workflow:
 
 ### 1. Inspect the current Spectacles setup
 
-Look for:
+If the `spectacles_navigate` tool is available, use it before broad raw-source reads.
+
+Start with compact navigation queries such as:
+
+- `{"action":"summary"}`
+- `{"action":"issues"}`
+- `{"action":"search","query":"<feature-or-symbol>"}`
+- `{"action":"contract","name":"<contract-name>"}`
+- `{"action":"implementation","name":"<implementation-name>"}`
+
+Use `spectacles_navigate` to:
+
+- find existing contracts for the requested behavior
+- find implementations already bound with `implement(...)`
+- detect unimplemented contracts
+- detect unresolved implementations
+- jump to the most relevant files and locations before reading full source
+
+If the tool is not available in the current agent runtime, fall back to repository search and normal file inspection.
+
+Then look for:
 
 - contract definition files
 - `implement(...)` bindings

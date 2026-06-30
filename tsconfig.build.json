@@ -18,6 +18,7 @@
     "planning.ts",
     "rendering.ts",
     "generation.ts",
+    "navigation.ts",
     "session.ts",
     "cli.ts"
   ],
