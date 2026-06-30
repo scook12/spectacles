@@ -2,7 +2,7 @@
 
 Spectacles is a spec-driven development (SDD) framework for TypeScript.
 
-It has two parts:
+It has three parts:
 
 1. **Library API** for defining contracts and binding implementations
 2. **Generator/CLI** for discovering those contracts and writing Vitest test files
